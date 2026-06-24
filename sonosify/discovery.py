@@ -11,8 +11,21 @@ from sonosify.client import DEFAULT_TIMEOUT, SonosClient
 from sonosify.errors import AmbiguousSpeakerError, DiscoveryError, SpeakerNotFoundError
 from sonosify.models import Group, Speaker
 
+DEFAULT_DISCOVERY_TIMEOUT = 2.0
+
 _SSDP_ADDRESS = ("239.255.255.250", 1900)
 _SONOS_ST = "urn:schemas-upnp-org:device:ZonePlayer:1"
+_SSDP_SEARCH_MESSAGE = "\r\n".join(
+    [
+        "M-SEARCH * HTTP/1.1",
+        f"HOST: {_SSDP_ADDRESS[0]}:{_SSDP_ADDRESS[1]}",
+        'MAN: "ssdp:discover"',
+        "MX: 1",
+        f"ST: {_SONOS_ST}",
+        "",
+        "",
+    ]
+).encode()
 
 
 class SonosSystem(BaseModel):
@@ -81,14 +94,23 @@ class SonosSystem(BaseModel):
 
 class SonosController:
     def __init__(
-        self, *, timeout: float = DEFAULT_TIMEOUT, include_invisible: bool = False
+        self,
+        *,
+        timeout: float = DEFAULT_TIMEOUT,
+        discovery_timeout: float = DEFAULT_DISCOVERY_TIMEOUT,
+        include_invisible: bool = False,
     ) -> None:
         self.timeout = timeout
+        self.discovery_timeout = discovery_timeout
         self.include_invisible = include_invisible
         self.system: SonosSystem | None = None
 
     async def discover(self) -> SonosSystem:
-        self.system = await discover(timeout=self.timeout, include_invisible=self.include_invisible)
+        self.system = await discover(
+            timeout=self.timeout,
+            discovery_timeout=self.discovery_timeout,
+            include_invisible=self.include_invisible,
+        )
         return self.system
 
     async def client(
@@ -126,9 +148,12 @@ class SonosController:
 
 
 async def discover(
-    *, timeout: float = DEFAULT_TIMEOUT, include_invisible: bool = False
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+    discovery_timeout: float = DEFAULT_DISCOVERY_TIMEOUT,
+    include_invisible: bool = False,
 ) -> SonosSystem:
-    locations = await asyncio.to_thread(_ssdp_locations, timeout)
+    locations = await asyncio.to_thread(_ssdp_locations, discovery_timeout)
     if not locations:
         raise DiscoveryError("no Sonos speakers discovered via SSDP")
 
@@ -158,28 +183,19 @@ async def discover(
 
 
 def _ssdp_locations(timeout: float) -> set[str]:
-    message = "\r\n".join(
-        [
-            "M-SEARCH * HTTP/1.1",
-            "HOST: 239.255.255.250:1900",
-            'MAN: "ssdp:discover"',
-            "MX: 1",
-            f"ST: {_SONOS_ST}",
-            "",
-            "",
-        ]
-    ).encode()
+    # Blocking UDP multicast, run in a thread via asyncio.to_thread. asyncio's
+    # create_datagram_endpoint is not a reliable substitute here: on Windows it
+    # sends the M-SEARCH out the wrong interface and receives no replies.
     locations: set[str] = set()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as sock:
         sock.settimeout(timeout)
-        sock.sendto(message, _SSDP_ADDRESS)
+        sock.sendto(_SSDP_SEARCH_MESSAGE, _SSDP_ADDRESS)
         while True:
             try:
                 data, _ = sock.recvfrom(65535)
             except TimeoutError:
                 break
-            headers = _parse_headers(data.decode(errors="ignore"))
-            location = headers.get("location")
+            location = _parse_headers(data.decode(errors="ignore")).get("location")
             if location:
                 locations.add(location)
     return locations

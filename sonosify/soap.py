@@ -6,13 +6,13 @@ import httpx
 
 from sonosify.errors import UPnPError
 
-SOAP_ENV_NS = "http://schemas.xmlsoap.org/soap/envelope/"
+_SOAP_ENV_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 
 
 def build_envelope(service_urn: str, action: str, args: Mapping[str, object] | None = None) -> str:
     body = [
         '<?xml version="1.0"?>',
-        f'<s:Envelope xmlns:s="{SOAP_ENV_NS}" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">',
+        f'<s:Envelope xmlns:s="{_SOAP_ENV_NS}" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">',
         "<s:Body>",
         f'<u:{action} xmlns:u="{escape(service_urn, quote=True)}">',
     ]

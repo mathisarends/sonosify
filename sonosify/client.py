@@ -3,7 +3,7 @@ from typing import Self
 import httpx
 
 from sonosify.didl import parse_favorites, parse_track_metadata, radio_metadata
-from sonosify.events import DEFAULT_SERVICES, EventSubscription
+from sonosify.events import DEFAULT_SERVICES, EventService, EventSubscription
 from sonosify.models import Favorite, PlaybackState, Speaker, Track
 from sonosify.soap import soap_call
 from sonosify.spotify import parse_spotify_uri, spotify_metadata
@@ -195,7 +195,7 @@ class SonosClient:
     def watch(
         self,
         *,
-        services: tuple[str, ...] = DEFAULT_SERVICES,
+        services: tuple[str | EventService, ...] = DEFAULT_SERVICES,
         callback_host: str | None = None,
         callback_port: int = 0,
         timeout_seconds: int = 300,

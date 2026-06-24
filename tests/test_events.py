@@ -1,6 +1,14 @@
 from html import escape
 
-from sonosify.events import parse_last_change, parse_notify_event
+from sonosify.events import (
+    AVTransportEvent,
+    EventService,
+    RenderingControlEvent,
+    TransportState,
+    UnknownSonosEvent,
+    parse_last_change,
+    parse_notify_event,
+)
 
 
 def test_parse_last_change_transport_state_and_metadata() -> None:
@@ -28,6 +36,25 @@ def test_parse_last_change_transport_state_and_metadata() -> None:
     assert "Song" in values["CurrentTrackMetaData"]
 
 
+def test_parse_notify_event_returns_typed_av_transport_event() -> None:
+    last_change = (
+        '<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/">'
+        '<InstanceID val="0"><TransportState val="PLAYING"/></InstanceID>'
+        "</Event>"
+    )
+    body = (
+        '<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">'
+        f"<e:property><LastChange>{escape(last_change)}</LastChange></e:property>"
+        "</e:propertyset>"
+    )
+
+    event = parse_notify_event(body, service="av_transport")
+
+    assert isinstance(event, AVTransportEvent)
+    assert event.service is EventService.AV_TRANSPORT
+    assert event.transport_state is TransportState.PLAYING
+
+
 def test_parse_notify_event_normalizes_rendering_control() -> None:
     last_change = (
         '<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/">'
@@ -42,7 +69,23 @@ def test_parse_notify_event_normalizes_rendering_control() -> None:
 
     event = parse_notify_event(body, service="rendering_control", sid="uuid:test", sequence=1)
 
+    assert isinstance(event, RenderingControlEvent)
+    assert event.service is EventService.RENDERING_CONTROL
     assert event.sid == "uuid:test"
     assert event.sequence == 1
     assert event.volume == 17
     assert event.muted is False
+
+
+def test_parse_notify_event_preserves_unknown_service_as_raw_event() -> None:
+    body = (
+        '<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">'
+        "<e:property><ZoneName>Kitchen</ZoneName></e:property>"
+        "</e:propertyset>"
+    )
+
+    event = parse_notify_event(body, service="device_properties")
+
+    assert isinstance(event, UnknownSonosEvent)
+    assert event.service == "device_properties"
+    assert event.values == {"ZoneName": "Kitchen"}

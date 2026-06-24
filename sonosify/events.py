@@ -3,10 +3,12 @@ import contextlib
 import socket
 import uuid
 from collections.abc import AsyncIterator, Sequence
+from enum import StrEnum
+from typing import Annotated, Literal, Self
 from xml.etree import ElementTree
 
 import httpx
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from sonosify.didl import parse_track_metadata
 from sonosify.models import Track
@@ -14,35 +16,59 @@ from sonosify.models import Track
 _AV_TRANSPORT_EVENT_PATH = "/MediaRenderer/AVTransport/Event"
 _RENDERING_CONTROL_EVENT_PATH = "/MediaRenderer/RenderingControl/Event"
 
-DEFAULT_SERVICES = ("av_transport", "rendering_control")
+
+class EventService(StrEnum):
+    AV_TRANSPORT = "av_transport"
+    RENDERING_CONTROL = "rendering_control"
 
 
-class SonosEvent(BaseModel):
+class TransportState(StrEnum):
+    STOPPED = "STOPPED"
+    PLAYING = "PLAYING"
+    TRANSITIONING = "TRANSITIONING"
+    PAUSED_PLAYBACK = "PAUSED_PLAYBACK"
+    PAUSED_RECORDING = "PAUSED_RECORDING"
+    RECORDING = "RECORDING"
+    NO_MEDIA_PRESENT = "NO_MEDIA_PRESENT"
+
+
+DEFAULT_SERVICES = (EventService.AV_TRANSPORT, EventService.RENDERING_CONTROL)
+
+type RawEventValues = dict[str, str]
+
+
+class BaseSonosEvent(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     service: str
-    values: dict[str, str]
+    values: RawEventValues
     sequence: int | None = None
     sid: str = ""
+
+
+class AVTransportEvent(BaseSonosEvent):
+    service: Literal[EventService.AV_TRANSPORT] = EventService.AV_TRANSPORT
     track: Track | None = None
+    transport_state: TransportState | None = None
 
-    @property
-    def transport_state(self) -> str:
-        return self.values.get("TransportState", "")
 
-    @property
-    def volume(self) -> int | None:
-        value = self.values.get("Volume")
-        return int(value) if value and value.isdigit() else None
+class RenderingControlEvent(BaseSonosEvent):
+    service: Literal[EventService.RENDERING_CONTROL] = EventService.RENDERING_CONTROL
+    volume: int | None = None
+    muted: bool | None = None
 
-    @property
-    def muted(self) -> bool | None:
-        value = self.values.get("Mute")
-        if value == "1":
-            return True
-        if value == "0":
-            return False
-        return None
+
+class UnknownSonosEvent(BaseSonosEvent):
+    pass
+
+
+type KnownSonosEvent = Annotated[
+    AVTransportEvent | RenderingControlEvent,
+    Field(discriminator="service"),
+]
+type SonosEvent = KnownSonosEvent | UnknownSonosEvent
+
+_KNOWN_EVENT_ADAPTER = TypeAdapter(KnownSonosEvent)
 
 
 class EventSubscription:
@@ -51,7 +77,7 @@ class EventSubscription:
         ip: str,
         *,
         port: int = 1400,
-        services: Sequence[str] = DEFAULT_SERVICES,
+        services: Sequence[str | EventService] = DEFAULT_SERVICES,
         callback_host: str | None = None,
         callback_port: int = 0,
         timeout_seconds: int = 300,
@@ -69,7 +95,7 @@ class EventSubscription:
         self._subscriptions: dict[str, str] = {}
         self._callback_paths: dict[str, str] = {}
 
-    async def __aenter__(self) -> EventSubscription:
+    async def __aenter__(self) -> Self:
         await self.start()
         return self
 
@@ -152,7 +178,7 @@ class EventSubscription:
             writer.close()
             await writer.wait_closed()
 
-    async def _subscribe(self, service: str, callback_url: str) -> str:
+    async def _subscribe(self, service: str | EventService, callback_url: str) -> str:
         response = await self._http.request(
             "SUBSCRIBE",
             self._event_url(service),
@@ -165,13 +191,13 @@ class EventSubscription:
         response.raise_for_status()
         return response.headers.get("SID", "")
 
-    async def _unsubscribe(self, service: str, sid: str) -> None:
+    async def _unsubscribe(self, service: str | EventService, sid: str) -> None:
         response = await self._http.request(
             "UNSUBSCRIBE", self._event_url(service), headers={"SID": sid}
         )
         response.raise_for_status()
 
-    def _event_url(self, service: str) -> str:
+    def _event_url(self, service: str | EventService) -> str:
         path = _event_path(service)
         return f"http://{self.ip}:{self.port}{path}"
 
@@ -182,7 +208,7 @@ class EventSubscription:
 def parse_notify_event(
     raw: str | bytes, *, service: str, sid: str = "", sequence: int | None = None
 ) -> SonosEvent:
-    values: dict[str, str] = {}
+    values: RawEventValues = {}
     root = ElementTree.fromstring(raw)
     for property_element in root.iter():
         if _local_name(property_element.tag) != "property":
@@ -204,14 +230,34 @@ def parse_notify_event(
             duration=values.get("CurrentTrackDuration", ""),
             position=_int_or_none(values.get("CurrentTrack")),
         )
-    return SonosEvent(service=service, values=values, sequence=sequence, sid=sid, track=track)
+    normalized_service = _normalize_service(service)
+    if normalized_service is None:
+        return UnknownSonosEvent(service=service, values=values, sequence=sequence, sid=sid)
+
+    event_data: dict[str, object] = {
+        "service": normalized_service,
+        "values": values,
+        "sequence": sequence,
+        "sid": sid,
+    }
+    if normalized_service == EventService.AV_TRANSPORT:
+        event_data.update(
+            track=track,
+            transport_state=_transport_state_or_none(values.get("TransportState")),
+        )
+    else:
+        event_data.update(
+            volume=_int_or_none(values.get("Volume")),
+            muted=_muted_or_none(values.get("Mute")),
+        )
+    return _KNOWN_EVENT_ADAPTER.validate_python(event_data)
 
 
-def parse_last_change(raw: str) -> dict[str, str]:
+def parse_last_change(raw: str) -> RawEventValues:
     if not raw:
         return {}
     root = ElementTree.fromstring(raw)
-    values: dict[str, str] = {}
+    values: RawEventValues = {}
     for element in root.iter():
         name = _local_name(element.tag)
         if name in {"Event", "InstanceID"}:
@@ -222,13 +268,22 @@ def parse_last_change(raw: str) -> dict[str, str]:
     return values
 
 
-def _event_path(service: str) -> str:
-    normalized = service.replace("-", "_").casefold()
-    if normalized in {"av", "av_transport", "avtransport"}:
+def _event_path(service: str | EventService) -> str:
+    normalized = _normalize_service(service)
+    if normalized == EventService.AV_TRANSPORT:
         return _AV_TRANSPORT_EVENT_PATH
-    if normalized in {"rendering", "rendering_control", "renderingcontrol"}:
+    if normalized == EventService.RENDERING_CONTROL:
         return _RENDERING_CONTROL_EVENT_PATH
     raise ValueError(f"unsupported event service: {service!r}")
+
+
+def _normalize_service(service: str | EventService) -> EventService | None:
+    normalized = service.replace("-", "_").casefold()
+    if normalized in {"av", "av_transport", "avtransport"}:
+        return EventService.AV_TRANSPORT
+    if normalized in {"rendering", "rendering_control", "renderingcontrol"}:
+        return EventService.RENDERING_CONTROL
+    return None
 
 
 def _local_ip_for(remote_ip: str) -> str:
@@ -257,3 +312,20 @@ def _int_or_none(value: str | None) -> int | None:
     if value is None or not value.isdigit():
         return None
     return int(value)
+
+
+def _muted_or_none(value: str | None) -> bool | None:
+    if value == "1":
+        return True
+    if value == "0":
+        return False
+    return None
+
+
+def _transport_state_or_none(value: str | None) -> TransportState | None:
+    if value is None:
+        return None
+    try:
+        return TransportState(value)
+    except ValueError:
+        return None
