@@ -5,7 +5,7 @@ def test_build_envelope_sorts_and_escapes_args() -> None:
     envelope = build_envelope("urn:test", "DoThing", {"B": "x&y", "A": "1"})
 
     assert envelope.index("<A>1</A>") < envelope.index("<B>x&amp;y</B>")
-    assert 'SOAPACTION' not in envelope
+    assert "SOAPACTION" not in envelope
 
 
 def test_parse_response_reads_direct_children() -> None:

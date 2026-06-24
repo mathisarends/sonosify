@@ -5,38 +5,59 @@ Programmatic Python API for discovering and controlling Sonos speakers on a loca
 This package ports the API core of `steipete/sonoscli` into Python. It intentionally does not include a CLI yet.
 
 ```python
+import asyncio
+
 from sonosify import SonosController
 
-sonos = SonosController()
-system = sonos.discover()
 
-print([speaker.room_name for speaker in system.speakers])
+async def main():
+    sonos = SonosController()
+    system = await sonos.discover()
 
-with system.client("Kitchen") as kitchen:
-    kitchen.pause()
-    kitchen.set_volume(25)
-    print(kitchen.now_playing())
+    print([speaker.room_name for speaker in system.speakers])
+
+    async with await sonos.client("Kitchen") as kitchen:
+        await kitchen.pause()
+        await kitchen.set_volume(25)
+        print(await kitchen.now_playing())
+
+
+asyncio.run(main())
 ```
 
 Lower-level direct device access is also available:
 
 ```python
+import asyncio
+
 from sonosify import SonosClient
 
-with SonosClient("192.168.1.42") as speaker:
-    speaker.play_uri("https://example.com/live.mp3", radio=True, title="Example Radio")
+
+async def main():
+    async with SonosClient("192.168.1.42") as speaker:
+        await speaker.play_uri("https://example.com/live.mp3", radio=True, title="Example Radio")
+
+
+asyncio.run(main())
 ```
 
 Live updates use Sonos UPnP event subscriptions:
 
 ```python
+import asyncio
+
 from sonosify import SonosController
 
-sonos = SonosController()
-with sonos.client("Kitchen") as kitchen:
-    with kitchen.watch() as watcher:
-        for event in watcher:
-            print(event.service, event.values)
+
+async def main():
+    sonos = SonosController()
+    async with await sonos.client("Kitchen") as kitchen:
+        async with kitchen.watch() as watcher:
+            async for event in watcher:
+                print(event.service, event.values)
+
+
+asyncio.run(main())
 ```
 
 The watch API starts a local HTTP callback server. Your OS firewall may ask whether Python can accept incoming connections.

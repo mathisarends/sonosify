@@ -8,7 +8,7 @@ def test_parse_last_change_transport_state_and_metadata() -> None:
         '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" '
         'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" '
         'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
-        '<item><dc:title>Song</dc:title><dc:creator>Artist</dc:creator></item>'
+        "<item><dc:title>Song</dc:title><dc:creator>Artist</dc:creator></item>"
         "</DIDL-Lite>"
     )
     raw = (

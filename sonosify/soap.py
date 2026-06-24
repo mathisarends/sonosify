@@ -4,7 +4,7 @@ from xml.etree import ElementTree
 
 import httpx
 
-from .errors import UPnPError
+from sonosify.errors import UPnPError
 
 SOAP_ENV_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 

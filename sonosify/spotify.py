@@ -50,11 +50,11 @@ def spotify_metadata(item: SpotifyItem, title: str = "") -> str:
         'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
         '<item id="100c206cspotify%3a" parentID="100c206cspotify%3a" restricted="true">'
         f"<dc:title>{safe_title}</dc:title>"
-        '<upnp:class>object.item.audioItem.musicTrack</upnp:class>'
+        "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
         '<desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">'
         "SA_RINCON2311_X_#Svc2311-0-Token"
         "</desc>"
-        f"<res protocolInfo=\"sonos.com-spotify:*:audio/x-spotify:*\">{escaped_uri}</res>"
+        f'<res protocolInfo="sonos.com-spotify:*:audio/x-spotify:*">{escaped_uri}</res>'
         "</item>"
         "</DIDL-Lite>"
     )

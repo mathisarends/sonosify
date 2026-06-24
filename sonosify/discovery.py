@@ -1,33 +1,39 @@
-"""Discovery and coordinator-aware system API."""
-
-from __future__ import annotations
-
+import asyncio
 import socket
 from collections.abc import Iterable
-from dataclasses import dataclass
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 import httpx
+from pydantic import BaseModel, ConfigDict
 
-from .client import DEFAULT_TIMEOUT, SonosClient
-from .errors import AmbiguousSpeakerError, DiscoveryError, SpeakerNotFoundError
-from .models import Group, Speaker
+from sonosify.client import DEFAULT_TIMEOUT, SonosClient
+from sonosify.errors import AmbiguousSpeakerError, DiscoveryError, SpeakerNotFoundError
+from sonosify.models import Group, Speaker
 
-SSDP_ADDRESS = ("239.255.255.250", 1900)
-SONOS_ST = "urn:schemas-upnp-org:device:ZonePlayer:1"
+_SSDP_ADDRESS = ("239.255.255.250", 1900)
+_SONOS_ST = "urn:schemas-upnp-org:device:ZonePlayer:1"
 
 
-@dataclass(slots=True)
-class SonosSystem:
-    """Discovered Sonos topology with convenience targeting helpers."""
+class SonosSystem(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
     speakers: tuple[Speaker, ...]
     groups: tuple[Group, ...]
     timeout: float = DEFAULT_TIMEOUT
 
-    def find(self, query: str | None = None, *, ip: str | None = None, include_invisible: bool = False) -> Speaker:
-        candidates = self.speakers if include_invisible else tuple(s for s in self.speakers if not s.invisible)
+    def find(
+        self,
+        query: str | None = None,
+        *,
+        ip: str | None = None,
+        include_invisible: bool = False,
+    ) -> Speaker:
+        candidates = (
+            self.speakers
+            if include_invisible
+            else tuple(s for s in self.speakers if not s.invisible)
+        )
         if ip is not None:
             for speaker in candidates:
                 if speaker.ip == ip:
@@ -74,50 +80,63 @@ class SonosSystem:
 
 
 class SonosController:
-    """High-level API that discovers the system and targets group coordinators."""
-
-    def __init__(self, *, timeout: float = DEFAULT_TIMEOUT, include_invisible: bool = False) -> None:
+    def __init__(
+        self, *, timeout: float = DEFAULT_TIMEOUT, include_invisible: bool = False
+    ) -> None:
         self.timeout = timeout
         self.include_invisible = include_invisible
         self.system: SonosSystem | None = None
 
-    def discover(self) -> SonosSystem:
-        self.system = discover(timeout=self.timeout, include_invisible=self.include_invisible)
+    async def discover(self) -> SonosSystem:
+        self.system = await discover(timeout=self.timeout, include_invisible=self.include_invisible)
         return self.system
 
-    def client(self, room: str | None = None, *, ip: str | None = None, coordinator: bool = True) -> SonosClient:
-        system = self.system or self.discover()
-        return system.client(room, ip=ip, coordinator=coordinator, include_invisible=self.include_invisible)
+    async def client(
+        self,
+        room: str | None = None,
+        *,
+        ip: str | None = None,
+        coordinator: bool = True,
+    ) -> SonosClient:
+        system = self.system or await self.discover()
+        return system.client(
+            room,
+            ip=ip,
+            coordinator=coordinator,
+            include_invisible=self.include_invisible,
+        )
 
-    def play(self, room: str | None = None, *, ip: str | None = None) -> None:
-        with self.client(room, ip=ip) as client:
-            client.play()
+    async def play(self, room: str | None = None, *, ip: str | None = None) -> None:
+        async with await self.client(room, ip=ip) as client:
+            await client.play()
 
-    def pause(self, room: str | None = None, *, ip: str | None = None) -> None:
-        with self.client(room, ip=ip) as client:
-            client.pause()
+    async def pause(self, room: str | None = None, *, ip: str | None = None) -> None:
+        async with await self.client(room, ip=ip) as client:
+            await client.pause()
 
-    def stop(self, room: str | None = None, *, ip: str | None = None) -> None:
-        with self.client(room, ip=ip) as client:
-            client.stop()
+    async def stop(self, room: str | None = None, *, ip: str | None = None) -> None:
+        async with await self.client(room, ip=ip) as client:
+            await client.stop()
 
-    def set_volume(self, volume: int, room: str | None = None, *, ip: str | None = None) -> None:
-        with self.client(room, ip=ip, coordinator=False) as client:
-            client.set_volume(volume)
+    async def set_volume(
+        self, volume: int, room: str | None = None, *, ip: str | None = None
+    ) -> None:
+        async with await self.client(room, ip=ip, coordinator=False) as client:
+            await client.set_volume(volume)
 
 
-def discover(*, timeout: float = DEFAULT_TIMEOUT, include_invisible: bool = False) -> SonosSystem:
-    """Discover speakers using SSDP and then enrich results from Sonos topology."""
-
-    locations = _ssdp_locations(timeout)
+async def discover(
+    *, timeout: float = DEFAULT_TIMEOUT, include_invisible: bool = False
+) -> SonosSystem:
+    locations = await asyncio.to_thread(_ssdp_locations, timeout)
     if not locations:
         raise DiscoveryError("no Sonos speakers discovered via SSDP")
 
-    speakers = _speakers_from_locations(locations, timeout)
+    speakers = await _speakers_from_locations(locations, timeout)
     if not speakers:
         raise DiscoveryError("Sonos speakers responded but no device metadata could be parsed")
 
-    topology = _topology_from_speakers(speakers, timeout)
+    topology = await _topology_from_speakers(speakers, timeout)
     if topology:
         speakers, groups = topology
     else:
@@ -126,7 +145,11 @@ def discover(*, timeout: float = DEFAULT_TIMEOUT, include_invisible: bool = Fals
     if not include_invisible:
         speakers = tuple(speaker for speaker in speakers if not speaker.invisible)
         groups = tuple(
-            Group(group.id, group.coordinator_uid, tuple(s for s in group.members if not s.invisible))
+            Group(
+                id=group.id,
+                coordinator_uid=group.coordinator_uid,
+                members=tuple(s for s in group.members if not s.invisible),
+            )
             for group in groups
             if any(not s.invisible for s in group.members)
         )
@@ -141,7 +164,7 @@ def _ssdp_locations(timeout: float) -> set[str]:
             "HOST: 239.255.255.250:1900",
             'MAN: "ssdp:discover"',
             "MX: 1",
-            f"ST: {SONOS_ST}",
+            f"ST: {_SONOS_ST}",
             "",
             "",
         ]
@@ -149,7 +172,7 @@ def _ssdp_locations(timeout: float) -> set[str]:
     locations: set[str] = set()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as sock:
         sock.settimeout(timeout)
-        sock.sendto(message, SSDP_ADDRESS)
+        sock.sendto(message, _SSDP_ADDRESS)
         while True:
             try:
                 data, _ = sock.recvfrom(65535)
@@ -162,18 +185,21 @@ def _ssdp_locations(timeout: float) -> set[str]:
     return locations
 
 
-def _speakers_from_locations(locations: Iterable[str], timeout: float) -> tuple[Speaker, ...]:
-    speakers: dict[str, Speaker] = {}
-    with httpx.Client(timeout=timeout) as client:
-        for location in locations:
-            try:
-                response = client.get(location)
-                response.raise_for_status()
-                speaker = _speaker_from_device_xml(location, response.text)
-            except (httpx.HTTPError, ElementTree.ParseError, ValueError):
-                continue
-            speakers[speaker.uid or speaker.ip] = speaker
+async def _speakers_from_locations(locations: Iterable[str], timeout: float) -> tuple[Speaker, ...]:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        tasks = [_speaker_from_location(client, location) for location in locations]
+        results = await asyncio.gather(*tasks)
+    speakers = {speaker.uid or speaker.ip: speaker for speaker in results if speaker is not None}
     return tuple(speakers.values())
+
+
+async def _speaker_from_location(client: httpx.AsyncClient, location: str) -> Speaker | None:
+    try:
+        response = await client.get(location)
+        response.raise_for_status()
+        return _speaker_from_device_xml(location, response.text)
+    except httpx.HTTPError, ElementTree.ParseError, ValueError:
+        return None
 
 
 def _speaker_from_device_xml(location: str, xml_text: str) -> Speaker:
@@ -187,12 +213,14 @@ def _speaker_from_device_xml(location: str, xml_text: str) -> Speaker:
     return Speaker(ip=parsed.hostname or "", port=parsed.port or 1400, room_name=room, uid=uid)
 
 
-def _topology_from_speakers(speakers: tuple[Speaker, ...], timeout: float) -> tuple[tuple[Speaker, ...], tuple[Group, ...]] | None:
+async def _topology_from_speakers(
+    speakers: tuple[Speaker, ...], timeout: float
+) -> tuple[tuple[Speaker, ...], tuple[Group, ...]] | None:
     by_uid = {speaker.uid: speaker for speaker in speakers if speaker.uid}
     for speaker in speakers:
         try:
-            with SonosClient.from_speaker(speaker, timeout=timeout) as client:
-                state = client.get_zone_group_state()
+            async with SonosClient.from_speaker(speaker, timeout=timeout) as client:
+                state = await client.get_zone_group_state()
         except Exception:
             continue
         parsed = _parse_topology(state, by_uid)
@@ -201,7 +229,9 @@ def _topology_from_speakers(speakers: tuple[Speaker, ...], timeout: float) -> tu
     return None
 
 
-def _parse_topology(state: str, known: dict[str, Speaker]) -> tuple[tuple[Speaker, ...], tuple[Group, ...]] | None:
+def _parse_topology(
+    state: str, known: dict[str, Speaker]
+) -> tuple[tuple[Speaker, ...], tuple[Group, ...]] | None:
     if not state:
         return None
     try:
@@ -241,7 +271,14 @@ def _parse_topology(state: str, known: dict[str, Speaker]) -> tuple[tuple[Speake
 
 
 def _groups_from_speakers(speakers: tuple[Speaker, ...]) -> tuple[Group, ...]:
-    return tuple(Group(id=speaker.uid or speaker.ip, coordinator_uid=speaker.uid, members=(speaker,)) for speaker in speakers)
+    return tuple(
+        Group(
+            id=speaker.uid or speaker.ip,
+            coordinator_uid=speaker.uid,
+            members=(speaker,),
+        )
+        for speaker in speakers
+    )
 
 
 def _parse_headers(raw: str) -> dict[str, str]:
