@@ -1,9 +1,11 @@
 from typing import Self
 
 import httpx
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from sonosify._parsing import int_or_none
 from sonosify.didl import parse_favorites, parse_track_metadata, radio_metadata
-from sonosify.events import DEFAULT_SERVICES, EventService, EventSubscription
+from sonosify.events import DEFAULT_SERVICES, EventService, EventSubscription, TransportState
 from sonosify.models import Favorite, PlaybackState, Speaker, Track
 from sonosify.soap import soap_call
 from sonosify.spotify import parse_spotify_uri, spotify_metadata
@@ -15,6 +17,44 @@ _RENDERING_CONTROL = "urn:schemas-upnp-org:service:RenderingControl:1"
 _CONTENT_DIRECTORY = "urn:schemas-upnp-org:service:ContentDirectory:1"
 _DEVICE_PROPERTIES = "urn:schemas-upnp-org:service:DeviceProperties:1"
 _ZONE_GROUP_TOPOLOGY = "urn:schemas-upnp-org:service:ZoneGroupTopology:1"
+
+
+class TransportInfo(BaseModel):
+    """Typed view of the AVTransport GetTransportInfo response."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    state: TransportState | None = Field(None, alias="CurrentTransportState")
+    status: str = Field("", alias="CurrentTransportStatus")
+    speed: str = Field("", alias="CurrentSpeed")
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def _coerce_state(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        try:
+            return TransportState(value)
+        except ValueError:
+            return None
+
+
+class PositionInfo(BaseModel):
+    """Typed view of the AVTransport GetPositionInfo response."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    track: int | None = Field(None, alias="Track")
+    track_uri: str = Field("", alias="TrackURI")
+    track_duration: str = Field("", alias="TrackDuration")
+    track_metadata: str = Field("", alias="TrackMetaData")
+    relative_time: str = Field("", alias="RelTime")
+    absolute_time: str = Field("", alias="AbsTime")
+
+    @field_validator("track", mode="before")
+    @classmethod
+    def _coerce_track(cls, value: object) -> object:
+        return int_or_none(value) if isinstance(value, str) else value
 
 
 class SonosClient:
@@ -74,7 +114,14 @@ class SonosClient:
         await self.__av_transport("SetAVTransportURI", CurrentURI=uri, CurrentURIMetaData=metadata)
         await self.play()
 
-    async def enqueue_uri(self, uri: str, *, metadata: str = "", next_: bool = False) -> int | None:
+    async def enqueue_uri(
+        self,
+        uri: str,
+        *,
+        metadata: str = "",
+        next_: bool = False,
+        play: bool = False,
+    ) -> int | None:
         result = await self.__av_transport(
             "AddURIToQueue",
             EnqueuedURI=uri,
@@ -83,12 +130,21 @@ class SonosClient:
             EnqueueAsNext="1" if next_ else "0",
         )
         value = result.get("FirstTrackNumberEnqueued")
-        return int(value) if value and value.isdigit() else None
+        position = int(value) if value and value.isdigit() else None
+        if play and position is not None:
+            await self.seek_queue(position)
+            await self.play()
+        return position
 
-    async def open_spotify(self, value: str, *, title: str = "", next_: bool = False) -> int | None:
+    async def open_spotify(
+        self, value: str, *, title: str = "", next_: bool = False, play: bool = False
+    ) -> int | None:
         item = parse_spotify_uri(value)
         return await self.enqueue_uri(
-            item.sonos_uri, metadata=spotify_metadata(item, title), next_=next_
+            item.sonos_uri,
+            metadata=spotify_metadata(item, title),
+            next_=next_,
+            play=play,
         )
 
     async def line_in(self, source: Speaker | str | None = None) -> None:
@@ -110,6 +166,24 @@ class SonosClient:
         volume = max(0, min(100, volume))
         await self._rendering("SetVolume", Channel="Master", DesiredVolume=str(volume))
 
+    async def adjust_volume(self, delta: int) -> int:
+        volume = max(0, min(100, await self.get_volume() + delta))
+        await self.set_volume(volume)
+        return volume
+
+    async def get_group_volume(self) -> int:
+        result = await self._rendering("GetGroupVolume")
+        return int(result.get("CurrentVolume", "0"))
+
+    async def set_group_volume(self, volume: int) -> None:
+        volume = max(0, min(100, volume))
+        await self._rendering("SetGroupVolume", DesiredVolume=str(volume))
+
+    async def adjust_group_volume(self, delta: int) -> int:
+        volume = max(0, min(100, await self.get_group_volume() + delta))
+        await self.set_group_volume(volume)
+        return volume
+
     async def get_mute(self) -> bool:
         result = await self._rendering("GetMute", Channel="Master")
         return result.get("CurrentMute") == "1"
@@ -122,24 +196,29 @@ class SonosClient:
         await self.set_mute(muted)
         return muted
 
-    async def get_transport_info(self) -> dict[str, str]:
-        return await self.__av_transport("GetTransportInfo")
+    async def get_transport_info(self) -> TransportInfo:
+        result = await self.__av_transport("GetTransportInfo")
+        return TransportInfo.model_validate(result)
+
+    async def get_position_info(self) -> PositionInfo:
+        result = await self.__av_transport("GetPositionInfo")
+        return PositionInfo.model_validate(result)
 
     async def now_playing(self) -> PlaybackState:
         transport = await self.get_transport_info()
-        position = await self.__av_transport("GetPositionInfo")
+        position = await self.get_position_info()
         track = parse_track_metadata(
-            position.get("TrackMetaData", ""),
-            uri=position.get("TrackURI", ""),
-            duration=position.get("TrackDuration", ""),
-            position=_int_or_none(position.get("Track")),
+            position.track_metadata,
+            uri=position.track_uri,
+            duration=position.track_duration,
+            position=position.track,
         )
         return PlaybackState(
-            state=transport.get("CurrentTransportState", ""),
+            state=transport.state.value if transport.state else "",
             track=track,
-            relative_time=position.get("RelTime", ""),
-            absolute_time=position.get("AbsTime", ""),
-            track_duration=position.get("TrackDuration", ""),
+            relative_time=position.relative_time,
+            absolute_time=position.absolute_time,
+            track_duration=position.track_duration,
         )
 
     async def queue(self, *, start: int = 0, count: int = 100) -> list[Track]:
@@ -191,6 +270,17 @@ class SonosClient:
             CurrentURIMetaData=favorite.metadata,
         )
         await self.play()
+
+    async def join(self, coordinator: Speaker | str) -> None:
+        coordinator_uid = self._source_uid(coordinator)
+        await self.__av_transport(
+            "SetAVTransportURI",
+            CurrentURI=f"x-rincon:{coordinator_uid}",
+            CurrentURIMetaData="",
+        )
+
+    async def unjoin(self) -> None:
+        await self.__av_transport("BecomeCoordinatorOfStandaloneGroup")
 
     def watch(
         self,
@@ -259,9 +349,3 @@ class SonosClient:
         if self.uid:
             return self.uid
         raise ValueError("line-in playback requires a source Speaker or RINCON uid")
-
-
-def _int_or_none(value: str | None) -> int | None:
-    if value is None or not value.isdigit():
-        return None
-    return int(value)

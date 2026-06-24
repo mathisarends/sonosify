@@ -2,13 +2,40 @@ from html import escape
 
 from sonosify.events import (
     AVTransportEvent,
+    AVTransportValues,
     EventService,
     RenderingControlEvent,
+    RenderingControlValues,
     TransportState,
     UnknownSonosEvent,
     parse_last_change,
     parse_notify_event,
 )
+
+
+def test_av_transport_values_parse_aliases_and_coerce() -> None:
+    values = AVTransportValues.model_validate(
+        {"TransportState": "PLAYING", "CurrentTrack": "3", "CurrentTrackURI": "x-sonos:1"}
+    )
+
+    assert values.transport_state is TransportState.PLAYING
+    assert values.current_track == 3
+    assert values.current_track_uri == "x-sonos:1"
+
+
+def test_av_transport_values_lenient_on_garbage() -> None:
+    values = AVTransportValues.model_validate({"TransportState": "BOGUS", "CurrentTrack": "n/a"})
+
+    assert values.transport_state is None
+    assert values.current_track is None
+
+
+def test_rendering_control_values_coerce_volume_and_mute() -> None:
+    values = RenderingControlValues.model_validate({"Volume": "17", "Mute": "1"})
+
+    assert values.volume == 17
+    assert values.muted is True
+    assert RenderingControlValues.model_validate({"Mute": "x"}).muted is None
 
 
 def test_parse_last_change_transport_state_and_metadata() -> None:

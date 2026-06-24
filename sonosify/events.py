@@ -8,8 +8,9 @@ from typing import Annotated, Literal, Self
 from xml.etree import ElementTree
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
+from sonosify._parsing import int_or_none, local_name, parse_headers
 from sonosify.didl import parse_track_metadata
 from sonosify.models import Track
 
@@ -155,7 +156,7 @@ class EventSubscription:
         try:
             raw_headers = await reader.readuntil(b"\r\n\r\n")
             header_text = raw_headers.decode(errors="ignore")
-            request_line, headers = _parse_http_headers(header_text)
+            request_line, headers = parse_headers(header_text)
             parts = request_line.split()
             method = parts[0] if parts else ""
             path = parts[1] if len(parts) > 1 else ""
@@ -167,7 +168,7 @@ class EventSubscription:
                     body,
                     service=self._service_for_path(path),
                     sid=headers.get("sid", ""),
-                    sequence=_int_or_none(headers.get("seq")),
+                    sequence=int_or_none(headers.get("seq")),
                 )
                 await self._events.put(event)
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
@@ -205,31 +206,64 @@ class EventSubscription:
         return self._callback_paths.get(path, "unknown")
 
 
+class AVTransportValues(BaseModel):
+    """Typed view of the fields carried by an AVTransport LastChange payload."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    transport_state: TransportState | None = Field(None, alias="TransportState")
+    current_track: int | None = Field(None, alias="CurrentTrack")
+    current_track_uri: str = Field("", alias="CurrentTrackURI")
+    current_track_duration: str = Field("", alias="CurrentTrackDuration")
+    current_track_metadata: str = Field("", alias="CurrentTrackMetaData")
+    enqueued_metadata: str = Field("", alias="EnqueuedTransportURIMetaData")
+
+    @field_validator("transport_state", mode="before")
+    @classmethod
+    def _coerce_transport_state(cls, value: object) -> object:
+        return _transport_state_or_none(value) if isinstance(value, str) else value
+
+    @field_validator("current_track", mode="before")
+    @classmethod
+    def _coerce_current_track(cls, value: object) -> object:
+        return int_or_none(value) if isinstance(value, str) else value
+
+
+class RenderingControlValues(BaseModel):
+    """Typed view of the fields carried by a RenderingControl LastChange payload."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    volume: int | None = Field(None, alias="Volume")
+    muted: bool | None = Field(None, alias="Mute")
+
+    @field_validator("volume", mode="before")
+    @classmethod
+    def _coerce_volume(cls, value: object) -> object:
+        return int_or_none(value) if isinstance(value, str) else value
+
+    @field_validator("muted", mode="before")
+    @classmethod
+    def _coerce_muted(cls, value: object) -> object:
+        return _muted_or_none(value) if isinstance(value, str) else value
+
+
 def parse_notify_event(
     raw: str | bytes, *, service: str, sid: str = "", sequence: int | None = None
 ) -> SonosEvent:
     values: RawEventValues = {}
     root = ElementTree.fromstring(raw)
     for property_element in root.iter():
-        if _local_name(property_element.tag) != "property":
+        if local_name(property_element.tag) != "property":
             continue
         for child in list(property_element):
-            name = _local_name(child.tag)
+            name = local_name(child.tag)
             text = child.text or ""
             if name == "LastChange":
                 values.update(parse_last_change(text))
             else:
                 values[name] = text
 
-    track = None
-    metadata = values.get("CurrentTrackMetaData") or values.get("EnqueuedTransportURIMetaData")
-    if metadata:
-        track = parse_track_metadata(
-            metadata,
-            uri=values.get("CurrentTrackURI", ""),
-            duration=values.get("CurrentTrackDuration", ""),
-            position=_int_or_none(values.get("CurrentTrack")),
-        )
     normalized_service = _normalize_service(service)
     if normalized_service is None:
         return UnknownSonosEvent(service=service, values=values, sequence=sequence, sid=sid)
@@ -241,15 +275,22 @@ def parse_notify_event(
         "sid": sid,
     }
     if normalized_service == EventService.AV_TRANSPORT:
+        av = AVTransportValues.model_validate(values)
+        metadata = av.current_track_metadata or av.enqueued_metadata
         event_data.update(
-            track=track,
-            transport_state=_transport_state_or_none(values.get("TransportState")),
+            track=parse_track_metadata(
+                metadata,
+                uri=av.current_track_uri,
+                duration=av.current_track_duration,
+                position=av.current_track,
+            )
+            if metadata
+            else None,
+            transport_state=av.transport_state,
         )
     else:
-        event_data.update(
-            volume=_int_or_none(values.get("Volume")),
-            muted=_muted_or_none(values.get("Mute")),
-        )
+        rc = RenderingControlValues.model_validate(values)
+        event_data.update(volume=rc.volume, muted=rc.muted)
     return _KNOWN_EVENT_ADAPTER.validate_python(event_data)
 
 
@@ -259,7 +300,7 @@ def parse_last_change(raw: str) -> RawEventValues:
     root = ElementTree.fromstring(raw)
     values: RawEventValues = {}
     for element in root.iter():
-        name = _local_name(element.tag)
+        name = local_name(element.tag)
         if name in {"Event", "InstanceID"}:
             continue
         value = element.attrib.get("val")
@@ -290,28 +331,6 @@ def _local_ip_for(remote_ip: str) -> str:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.connect((remote_ip, 1400))
         return sock.getsockname()[0]
-
-
-def _parse_http_headers(raw: str) -> tuple[str, dict[str, str]]:
-    lines = raw.splitlines()
-    request_line = lines[0] if lines else ""
-    headers: dict[str, str] = {}
-    for line in lines[1:]:
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        headers[key.strip().casefold()] = value.strip()
-    return request_line, headers
-
-
-def _local_name(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
-
-
-def _int_or_none(value: str | None) -> int | None:
-    if value is None or not value.isdigit():
-        return None
-    return int(value)
 
 
 def _muted_or_none(value: str | None) -> bool | None:

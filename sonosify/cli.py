@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Annotated
@@ -14,7 +12,13 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import guard
         "Install them with: pip install 'sonosify[cli]'"
     ) from exc
 
-from sonosify import EventService, SonosClient, SonosController, SonosSystem
+from sonosify import (
+    AVTransportEvent,
+    RenderingControlEvent,
+    SonosClient,
+    SonosController,
+    SonosSystem,
+)
 from sonosify.errors import SonosifyError
 
 app = typer.Typer(
@@ -253,18 +257,17 @@ def watch(room: RoomArg = None, ip: IpOpt = None) -> None:
 
     async def stream() -> None:
         controller = SonosController()
-        async with await controller.client(room, ip=ip) as client:
-            console.print(f"watching [cyan]{client.ip}[/]; press Ctrl+C to stop")
-            async with client.watch() as watcher:
-                async for event in watcher:
-                    match event.service:
-                        case EventService.AV_TRANSPORT:
-                            title = event.track.title if event.track else ""
-                            console.print(f"transport {event.transport_state} {title}")
-                        case EventService.RENDERING_CONTROL:
-                            console.print(f"rendering volume={event.volume} muted={event.muted}")
-                        case _:
-                            console.print(f"{event.service} {event.values}")
+        async with controller.watch(room, ip=ip) as watcher:
+            console.print(f"watching [cyan]{watcher.ip}[/]; press Ctrl+C to stop")
+            async for event in watcher:
+                match event:
+                    case AVTransportEvent(transport_state=state, track=track):
+                        title = track.title if track else ""
+                        console.print(f"transport {state} {title}")
+                    case RenderingControlEvent(volume=volume, muted=muted):
+                        console.print(f"rendering volume={volume} muted={muted}")
+                    case _:
+                        console.print(f"{event.service} {event.values}")
 
     try:
         _run(stream())

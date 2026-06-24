@@ -1,6 +1,7 @@
-from .client import DEFAULT_TIMEOUT, SonosClient
+from .client import DEFAULT_TIMEOUT, PositionInfo, SonosClient, TransportInfo
+from .controller import SonosController
 from .didl import parse_favorites, parse_track_metadata, radio_metadata
-from .discovery import DEFAULT_DISCOVERY_TIMEOUT, SonosController, SonosSystem, discover
+from .discovery import DEFAULT_DISCOVERY_TIMEOUT, discover
 from .errors import (
     AmbiguousSpeakerError,
     DiscoveryError,
@@ -23,6 +24,7 @@ from .events import (
 )
 from .models import Favorite, Group, PlaybackState, Speaker, Track
 from .spotify import SpotifyItem, parse_spotify_uri, spotify_metadata
+from .topology import SonosSystem
 
 __all__ = [
     "DEFAULT_DISCOVERY_TIMEOUT",
@@ -37,6 +39,7 @@ __all__ = [
     "Favorite",
     "Group",
     "PlaybackState",
+    "PositionInfo",
     "SonosClient",
     "SonosController",
     "SonosEvent",
@@ -47,6 +50,7 @@ __all__ = [
     "SpeakerNotFoundError",
     "SpotifyItem",
     "Track",
+    "TransportInfo",
     "TransportState",
     "UnknownSonosEvent",
     "UPnPError",

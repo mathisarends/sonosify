@@ -5,11 +5,12 @@ from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 import httpx
-from pydantic import BaseModel, ConfigDict
 
+from sonosify._parsing import local_name, parse_headers
 from sonosify.client import DEFAULT_TIMEOUT, SonosClient
-from sonosify.errors import AmbiguousSpeakerError, DiscoveryError, SpeakerNotFoundError
+from sonosify.errors import DiscoveryError
 from sonosify.models import Group, Speaker
+from sonosify.topology import SonosSystem
 
 DEFAULT_DISCOVERY_TIMEOUT = 2.0
 
@@ -26,125 +27,6 @@ _SSDP_SEARCH_MESSAGE = "\r\n".join(
         "",
     ]
 ).encode()
-
-
-class SonosSystem(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    speakers: tuple[Speaker, ...]
-    groups: tuple[Group, ...]
-    timeout: float = DEFAULT_TIMEOUT
-
-    def find(
-        self,
-        query: str | None = None,
-        *,
-        ip: str | None = None,
-        include_invisible: bool = False,
-    ) -> Speaker:
-        candidates = (
-            self.speakers
-            if include_invisible
-            else tuple(s for s in self.speakers if not s.invisible)
-        )
-        if ip is not None:
-            for speaker in candidates:
-                if speaker.ip == ip:
-                    return speaker
-            raise SpeakerNotFoundError(f"no speaker with IP {ip}")
-
-        if not query:
-            visible = [speaker for speaker in candidates if speaker.room_name]
-            if len(visible) == 1:
-                return visible[0]
-            raise SpeakerNotFoundError("room name is required when multiple speakers are available")
-
-        normalized = query.casefold()
-        exact = [speaker for speaker in candidates if speaker.room_name.casefold() == normalized]
-        if len(exact) == 1:
-            return exact[0]
-
-        fuzzy = [speaker for speaker in candidates if normalized in speaker.room_name.casefold()]
-        if len(fuzzy) == 1:
-            return fuzzy[0]
-        if len(fuzzy) > 1:
-            raise AmbiguousSpeakerError(query, [speaker.room_name for speaker in fuzzy])
-        raise SpeakerNotFoundError(f"no speaker matching {query!r}")
-
-    def coordinator_for(self, speaker: Speaker) -> Speaker:
-        uid = speaker.coordinator_uid or speaker.uid
-        for candidate in self.speakers:
-            if candidate.uid == uid:
-                return candidate
-        return speaker
-
-    def client(
-        self,
-        query: str | None = None,
-        *,
-        ip: str | None = None,
-        coordinator: bool = True,
-        include_invisible: bool = False,
-    ) -> SonosClient:
-        speaker = self.find(query, ip=ip, include_invisible=include_invisible)
-        if coordinator:
-            speaker = self.coordinator_for(speaker)
-        return SonosClient.from_speaker(speaker, timeout=self.timeout)
-
-
-class SonosController:
-    def __init__(
-        self,
-        *,
-        timeout: float = DEFAULT_TIMEOUT,
-        discovery_timeout: float = DEFAULT_DISCOVERY_TIMEOUT,
-        include_invisible: bool = False,
-    ) -> None:
-        self.timeout = timeout
-        self.discovery_timeout = discovery_timeout
-        self.include_invisible = include_invisible
-        self.system: SonosSystem | None = None
-
-    async def discover(self) -> SonosSystem:
-        self.system = await discover(
-            timeout=self.timeout,
-            discovery_timeout=self.discovery_timeout,
-            include_invisible=self.include_invisible,
-        )
-        return self.system
-
-    async def client(
-        self,
-        room: str | None = None,
-        *,
-        ip: str | None = None,
-        coordinator: bool = True,
-    ) -> SonosClient:
-        system = self.system or await self.discover()
-        return system.client(
-            room,
-            ip=ip,
-            coordinator=coordinator,
-            include_invisible=self.include_invisible,
-        )
-
-    async def play(self, room: str | None = None, *, ip: str | None = None) -> None:
-        async with await self.client(room, ip=ip) as client:
-            await client.play()
-
-    async def pause(self, room: str | None = None, *, ip: str | None = None) -> None:
-        async with await self.client(room, ip=ip) as client:
-            await client.pause()
-
-    async def stop(self, room: str | None = None, *, ip: str | None = None) -> None:
-        async with await self.client(room, ip=ip) as client:
-            await client.stop()
-
-    async def set_volume(
-        self, volume: int, room: str | None = None, *, ip: str | None = None
-    ) -> None:
-        async with await self.client(room, ip=ip, coordinator=False) as client:
-            await client.set_volume(volume)
 
 
 async def discover(
@@ -195,7 +77,8 @@ def _ssdp_locations(timeout: float) -> set[str]:
                 data, _ = sock.recvfrom(65535)
             except TimeoutError:
                 break
-            location = _parse_headers(data.decode(errors="ignore")).get("location")
+            _, headers = parse_headers(data.decode(errors="ignore"))
+            location = headers.get("location")
             if location:
                 locations.add(location)
     return locations
@@ -258,13 +141,13 @@ def _parse_topology(
     speakers: dict[str, Speaker] = {}
     groups: list[Group] = []
     for zone_group in root.iter():
-        if _local_name(zone_group.tag) != "ZoneGroup":
+        if local_name(zone_group.tag) != "ZoneGroup":
             continue
         group_id = zone_group.attrib.get("ID", "")
         coordinator_uid = zone_group.attrib.get("Coordinator", "")
         members: list[Speaker] = []
         for member in list(zone_group):
-            if _local_name(member.tag) != "ZoneGroupMember":
+            if local_name(member.tag) != "ZoneGroupMember":
                 continue
             uid = member.attrib.get("UUID", "")
             location = member.attrib.get("Location", "")
@@ -297,27 +180,13 @@ def _groups_from_speakers(speakers: tuple[Speaker, ...]) -> tuple[Group, ...]:
     )
 
 
-def _parse_headers(raw: str) -> dict[str, str]:
-    headers: dict[str, str] = {}
-    for line in raw.splitlines()[1:]:
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        headers[key.strip().casefold()] = value.strip()
-    return headers
-
-
-def _first(root: ElementTree.Element, local_name: str) -> ElementTree.Element | None:
+def _first(root: ElementTree.Element, name: str) -> ElementTree.Element | None:
     for element in root.iter():
-        if _local_name(element.tag) == local_name:
+        if local_name(element.tag) == name:
             return element
     return None
 
 
-def _text(root: ElementTree.Element, local_name: str) -> str:
-    element = _first(root, local_name)
+def _text(root: ElementTree.Element, name: str) -> str:
+    element = _first(root, name)
     return "" if element is None or element.text is None else element.text.strip()
-
-
-def _local_name(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Mapping
 from html import escape
 from xml.etree import ElementTree
@@ -7,6 +8,8 @@ import httpx
 from sonosify.errors import UPnPError
 
 _SOAP_ENV_NS = "http://schemas.xmlsoap.org/soap/envelope/"
+
+logger = logging.getLogger("sonosify.soap")
 
 
 def build_envelope(service_urn: str, action: str, args: Mapping[str, object] | None = None) -> str:
