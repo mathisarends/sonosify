@@ -328,13 +328,29 @@ def previous(room: RoomArg = None, ip: IpOpt = None) -> None:
 
 @app.command()
 def volume(
-    room: RoomArg = None,
+    target: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Room name, or target volume when using the configured default speaker. "
+                "Omit to read the current volume."
+            ),
+        ),
+    ] = None,
     level: Annotated[
         int | None, typer.Argument(help="Target volume (0-100). Omit to read the current volume.")
     ] = None,
     ip: IpOpt = None,
 ) -> None:
     """Get or set a speaker's volume."""
+    room = target
+    if level is None and target is not None:
+        try:
+            level = int(target)
+            room = None
+        except ValueError:
+            pass
+
     if level is None:
         current = _run(_with_client(room, ip, lambda c: c.get_volume(), coordinator=False))
         _print_object({"volume": current}, lambda: console.print(f"volume: [cyan]{current}[/]"))

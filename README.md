@@ -89,8 +89,13 @@ This exposes a `sonosify` command:
 ```powershell
 sonosify discover                       # list speakers on the network
 sonosify now-playing Kitchen            # show the current track
-sonosify play Kitchen                   # play / pause / stop / next / previous
+sonosify play Kitchen                   # resume playback
+sonosify pause Kitchen                  # pause playback
+sonosify stop Kitchen                   # stop playback
+sonosify next Kitchen                   # skip to the next track
+sonosify previous Kitchen               # skip to the previous track
 sonosify volume Kitchen 25              # set volume (omit the number to read it)
+sonosify volume 25                      # set volume on the configured default speaker
 sonosify volume-up Kitchen 10           # raise volume by N percentage points (default 5)
 sonosify volume-down Kitchen 10         # lower volume by N percentage points (default 5)
 sonosify mute Kitchen --on              # --on / --off, or omit to toggle
@@ -119,6 +124,7 @@ sonosify config show                    # show current defaults
 sonosify config clear                   # remove defaults
 
 sonosify play                           # now targets Kitchen automatically
+sonosify volume 25                      # set Kitchen to 25
 sonosify volume-up
 ```
 
