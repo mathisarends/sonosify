@@ -7,6 +7,7 @@ from .errors import (
     DiscoveryError,
     SonosifyError,
     SpeakerNotFoundError,
+    UnsupportedFeatureError,
     UPnPError,
 )
 from .events import (
@@ -23,7 +24,7 @@ from .events import (
     parse_notify_event,
 )
 from .models import Favorite, Group, PlaybackState, Speaker, Track
-from .spotify import SpotifyItem, parse_spotify_uri, spotify_metadata
+from .spotify import TrackReference, parse_track_id, track_metadata
 from .topology import SonosSystem
 
 __all__ = [
@@ -48,18 +49,19 @@ __all__ = [
     "RenderingControlEvent",
     "Speaker",
     "SpeakerNotFoundError",
-    "SpotifyItem",
+    "TrackReference",
     "Track",
     "TransportInfo",
     "TransportState",
     "UnknownSonosEvent",
     "UPnPError",
+    "UnsupportedFeatureError",
     "discover",
     "parse_last_change",
     "parse_notify_event",
     "parse_favorites",
-    "parse_spotify_uri",
+    "parse_track_id",
     "parse_track_metadata",
     "radio_metadata",
-    "spotify_metadata",
+    "track_metadata",
 ]

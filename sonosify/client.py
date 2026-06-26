@@ -8,7 +8,7 @@ from sonosify.didl import parse_favorites, parse_track_metadata, radio_metadata
 from sonosify.events import DEFAULT_SERVICES, EventService, EventSubscription, TransportState
 from sonosify.models import Favorite, PlaybackState, Speaker, Track
 from sonosify.soap import soap_call
-from sonosify.spotify import parse_spotify_uri, spotify_metadata
+from sonosify.spotify import parse_track_id, track_metadata
 
 DEFAULT_TIMEOUT = 15.0
 
@@ -114,6 +114,20 @@ class SonosClient:
         await self.__av_transport("SetAVTransportURI", CurrentURI=uri, CurrentURIMetaData=metadata)
         await self.play()
 
+    async def open(
+        self,
+        value: str | Favorite,
+        *,
+        title: str = "",
+        radio: bool = False,
+        next_: bool = False,
+    ) -> int | None:
+        if isinstance(value, Favorite):
+            await self.open_favorite(value)
+            return None
+        await self.play_uri(value, title=title, radio=radio)
+        return None
+
     async def enqueue_uri(
         self,
         uri: str,
@@ -136,13 +150,13 @@ class SonosClient:
             await self.play()
         return position
 
-    async def open_spotify(
+    async def open_track(
         self, value: str, *, title: str = "", next_: bool = False, play: bool = False
     ) -> int | None:
-        item = parse_spotify_uri(value)
+        track = parse_track_id(value)
         return await self.enqueue_uri(
-            item.sonos_uri,
-            metadata=spotify_metadata(item, title),
+            track.sonos_uri,
+            metadata=track_metadata(track, title),
             next_=next_,
             play=play,
         )

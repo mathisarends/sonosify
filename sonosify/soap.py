@@ -66,14 +66,17 @@ async def soap_call(
     action: str,
     args: Mapping[str, object] | None = None,
 ) -> dict[str, str]:
+    envelope = build_envelope(service_urn, action, args)
+    logger.debug("-> POST %s %s#%s\n%s", endpoint_url, service_urn, action, envelope)
     response = await client.post(
         endpoint_url,
-        content=build_envelope(service_urn, action, args),
+        content=envelope,
         headers={
             "Content-Type": 'text/xml; charset="utf-8"',
             "SOAPACTION": f'"{service_urn}#{action}"',
         },
     )
+    logger.debug("<- %s %s#%s\n%s", response.status_code, service_urn, action, response.text)
     if response.status_code == httpx.codes.OK:
         return parse_response(response.content)
 

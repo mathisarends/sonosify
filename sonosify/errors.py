@@ -2,6 +2,10 @@ class SonosifyError(Exception):
     pass
 
 
+class UnsupportedFeatureError(SonosifyError):
+    pass
+
+
 class DiscoveryError(SonosifyError):
     pass
 
