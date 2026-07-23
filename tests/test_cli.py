@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 from sonosify.cli import app, settings
 from sonosify.cli.commands import playback
 from sonosify.cli.runtime import async_command
+from sonosify.cli.state import CliState, OutputFormat
 
 
 def test_command_topology() -> None:
@@ -87,3 +88,17 @@ def test_settings_round_trip_and_default_target(
     }
     assert settings.resolve_target(None, None) == ("Kitchen", None)
     assert settings.resolve_target("Office", None) == ("Office", None)
+
+
+def test_cli_state_has_one_explicit_mutation_boundary() -> None:
+    state = CliState()
+
+    state.configure(format=OutputFormat.JSON, debug=True, timeout=3.0)
+
+    assert (state.format, state.debug, state.timeout) == (
+        OutputFormat.JSON,
+        True,
+        3.0,
+    )
+    with pytest.raises(AttributeError):
+        state.timeout = 5.0  # type: ignore[misc]

@@ -7,12 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from sonosify._parsing import int_or_none
 from sonosify.didl import parse_favorites, parse_track_metadata, radio_metadata
-from sonosify.events import (
-    DEFAULT_SERVICES,
-    EventService,
-    EventSubscription,
-    TransportState,
-)
+from sonosify.events import EventService, EventSubscription, TransportState
+from sonosify.events.models import DEFAULT_SERVICES
 from sonosify.models import Favorite, PlaybackState, Speaker, Track
 from sonosify.soap import soap_call
 from sonosify.spotify import parse_track_id, track_metadata
@@ -29,7 +25,7 @@ _ZONE_GROUP_TOPOLOGY = "urn:schemas-upnp-org:service:ZoneGroupTopology:1"
 class TransportInfo(BaseModel):
     """Typed view of the AVTransport GetTransportInfo response."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     state: TransportState | None = Field(None, alias="CurrentTransportState")
     status: str = Field("", alias="CurrentTransportStatus")
@@ -49,7 +45,7 @@ class TransportInfo(BaseModel):
 class PositionInfo(BaseModel):
     """Typed view of the AVTransport GetPositionInfo response."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     track: int | None = Field(None, alias="Track")
     track_uri: str = Field("", alias="TrackURI")
@@ -65,6 +61,8 @@ class PositionInfo(BaseModel):
 
 
 class SonosClient:
+    __slots__ = ("_http", "_ip", "_owns_client", "_port", "_uid")
+
     def __init__(
         self,
         ip: str,
@@ -74,9 +72,9 @@ class SonosClient:
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.ip = ip
-        self.port = port
-        self.uid = uid
+        self._ip = ip
+        self._port = port
+        self._uid = uid
         self._owns_client = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=timeout)
 
@@ -88,7 +86,19 @@ class SonosClient:
 
     @property
     def base_url(self) -> str:
-        return f"http://{self.ip}:{self.port}"
+        return f"http://{self._ip}:{self._port}"
+
+    @property
+    def ip(self) -> str:
+        return self._ip
+
+    @property
+    def port(self) -> int:
+        return self._port
+
+    @property
+    def uid(self) -> str:
+        return self._uid
 
     async def close(self) -> None:
         if self._owns_client:
@@ -165,6 +175,9 @@ class SonosClient:
         self, value: str, *, title: str = "", next_: bool = False, play: bool = False
     ) -> int | None:
         track = parse_track_id(value)
+        if play and not next_:
+            await self.play_uri(track.sonos_uri, title=title or track.uri)
+            return None
         return await self.enqueue_uri(
             track.sonos_uri,
             metadata=track_metadata(track, title),
@@ -177,12 +190,12 @@ class SonosClient:
         await self.play_uri(f"x-rincon-stream:{source_uid}")
 
     async def tv(self) -> None:
-        if not self.uid:
+        if not self._uid:
             raise ValueError(
                 "tv playback requires a SonosClient created from a "
                 "discovered Speaker with uid"
             )
-        await self.play_uri(f"x-sonos-htastream:{self.uid}:spdif")
+        await self.play_uri(f"x-sonos-htastream:{self._uid}:spdif")
 
     async def get_volume(self) -> int:
         result = await self._rendering("GetVolume", Channel="Master")
@@ -319,8 +332,8 @@ class SonosClient:
         timeout_seconds: int = 300,
     ) -> EventSubscription:
         return EventSubscription(
-            self.ip,
-            port=self.port,
+            self._ip,
+            port=self._port,
             services=services,
             callback_host=callback_host,
             callback_port=callback_port,
@@ -340,24 +353,36 @@ class SonosClient:
         return result.get("CurrentZoneName", "")
 
     async def __av_transport(self, action: str, **args: object) -> dict[str, str]:
+        kwargs = {
+            "InstanceID": "0",
+            **args,
+        }
         return await self._soap(
-            "/MediaRenderer/AVTransport/Control",
-            _AV_TRANSPORT,
-            action,
-            {"InstanceID": "0", **args},
+            path="/MediaRenderer/AVTransport/Control",
+            service_urn=_AV_TRANSPORT,
+            action=action,
+            **kwargs,
         )
 
     async def _rendering(self, action: str, **args: object) -> dict[str, str]:
+        kwargs = {
+            "InstanceID": "0",
+            **args,
+        }
         return await self._soap(
-            "/MediaRenderer/RenderingControl/Control",
-            _RENDERING_CONTROL,
-            action,
-            {"InstanceID": "0", **args},
+            path="/MediaRenderer/RenderingControl/Control",
+            service_urn=_RENDERING_CONTROL,
+            action=action,
+            **kwargs,
         )
 
     async def __content_directory(self, action: str, **args: object) -> dict[str, str]:
+        kwargs = {**args}
         return await self._soap(
-            "/MediaServer/ContentDirectory/Control", _CONTENT_DIRECTORY, action, args
+            path="/MediaServer/ContentDirectory/Control",
+            service_urn=_CONTENT_DIRECTORY,
+            action=action,
+            **kwargs,
         )
 
     async def _soap(
@@ -365,7 +390,7 @@ class SonosClient:
         path: str,
         service_urn: str,
         action: str,
-        args: dict[str, object] | None = None,
+        **args: object,
     ) -> dict[str, str]:
         return await soap_call(
             self._http, f"{self.base_url}{path}", service_urn, action, args
@@ -376,6 +401,6 @@ class SonosClient:
             return source.uid
         if isinstance(source, str):
             return source.removeprefix("uuid:")
-        if self.uid:
-            return self.uid
+        if self._uid:
+            return self._uid
         raise ValueError("line-in playback requires a source Speaker or RINCON uid")

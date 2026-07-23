@@ -1,16 +1,20 @@
+import asyncio
 from html import escape
+
+import pytest
+from pydantic import ValidationError
 
 from sonosify.events import (
     AVTransportEvent,
-    AVTransportValues,
     EventService,
+    EventSubscription,
     RenderingControlEvent,
-    RenderingControlValues,
     TransportState,
     UnknownSonosEvent,
-    parse_last_change,
     parse_notify_event,
 )
+from sonosify.events.models import AVTransportValues, RenderingControlValues
+from sonosify.events.parsing import parse_last_change
 
 
 def test_av_transport_values_parse_aliases_and_coerce() -> None:
@@ -25,6 +29,8 @@ def test_av_transport_values_parse_aliases_and_coerce() -> None:
     assert values.transport_state is TransportState.PLAYING
     assert values.current_track == 3
     assert values.current_track_uri == "x-sonos:1"
+    with pytest.raises(ValidationError):
+        values.current_track = 4
 
 
 def test_av_transport_values_lenient_on_garbage() -> None:
@@ -42,6 +48,17 @@ def test_rendering_control_values_coerce_volume_and_mute() -> None:
     assert values.volume == 17
     assert values.muted is True
     assert RenderingControlValues.model_validate({"Mute": "x"}).muted is None
+
+
+def test_event_subscription_configuration_is_read_only() -> None:
+    subscription = EventSubscription("127.0.0.1", callback_port=1234)
+
+    assert subscription.ip == "127.0.0.1"
+    assert subscription.callback_port == 1234
+    with pytest.raises(AttributeError):
+        subscription.callback_port = 4321  # type: ignore[misc]
+
+    asyncio.run(subscription.close())
 
 
 def test_parse_last_change_transport_state_and_metadata() -> None:

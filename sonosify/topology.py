@@ -1,16 +1,32 @@
-from pydantic import BaseModel, ConfigDict
-
 from sonosify.client import DEFAULT_TIMEOUT, SonosClient
 from sonosify.errors import AmbiguousSpeakerError, SpeakerNotFoundError
 from sonosify.models import Group, Speaker
 
 
-class SonosSystem(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class SonosSystem:
+    __slots__ = ("_groups", "_speakers", "_timeout")
 
-    speakers: tuple[Speaker, ...]
-    groups: tuple[Group, ...]
-    timeout: float = DEFAULT_TIMEOUT
+    def __init__(
+        self,
+        speakers: tuple[Speaker, ...],
+        groups: tuple[Group, ...],
+        timeout: float = DEFAULT_TIMEOUT,
+    ) -> None:
+        self._speakers = speakers
+        self._groups = groups
+        self._timeout = timeout
+
+    @property
+    def speakers(self) -> tuple[Speaker, ...]:
+        return self._speakers
+
+    @property
+    def groups(self) -> tuple[Group, ...]:
+        return self._groups
+
+    @property
+    def timeout(self) -> float:
+        return self._timeout
 
     def find(
         self,
@@ -20,9 +36,9 @@ class SonosSystem(BaseModel):
         include_invisible: bool = False,
     ) -> Speaker:
         candidates = (
-            self.speakers
+            self._speakers
             if include_invisible
-            else tuple(s for s in self.speakers if not s.invisible)
+            else tuple(s for s in self._speakers if not s.invisible)
         )
         if ip is not None:
             for speaker in candidates:
@@ -60,7 +76,7 @@ class SonosSystem(BaseModel):
 
     def coordinator_for(self, speaker: Speaker) -> Speaker:
         uid = speaker.coordinator_uid or speaker.uid
-        for candidate in self.speakers:
+        for candidate in self._speakers:
             if candidate.uid == uid:
                 return candidate
         return speaker
@@ -76,4 +92,4 @@ class SonosSystem(BaseModel):
         speaker = self.find(query, ip=ip, include_invisible=include_invisible)
         if coordinator:
             speaker = self.coordinator_for(speaker)
-        return SonosClient.from_speaker(speaker, timeout=self.timeout)
+        return SonosClient.from_speaker(speaker, timeout=self._timeout)

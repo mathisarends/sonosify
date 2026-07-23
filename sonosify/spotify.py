@@ -1,5 +1,5 @@
 from html import escape
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, ConfigDict
 
@@ -15,8 +15,7 @@ class TrackReference(BaseModel):
 
     @property
     def sonos_uri(self) -> str:
-        encoded = quote(f"track:{self.id}", safe="")
-        return f"x-sonos-spotify:{encoded}?sid=12&flags=8224&sn=1"
+        return f"x-sonos-spotify:{self.uri}?sid=9&flags=0&sn=2"
 
 
 def parse_track_id(value: str) -> TrackReference:

@@ -48,15 +48,14 @@ def main(
 ) -> None:
     """Discover and control Sonos speakers from the command line."""
     config_values = load_config()
-    state.format = output_format or OutputFormat(
-        config_values.get("default_format", OutputFormat.PLAIN)
-    )
-    state.timeout = (
-        timeout
+    state.configure(
+        format=output_format
+        or OutputFormat(config_values.get("default_format", OutputFormat.PLAIN)),
+        timeout=timeout
         if timeout is not None
-        else float(config_values.get("default_timeout", DEFAULT_TIMEOUT))
+        else float(config_values.get("default_timeout", DEFAULT_TIMEOUT)),
+        debug=debug,
     )
-    state.debug = debug
     if debug:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(name)s %(message)s"))

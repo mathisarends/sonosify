@@ -1,5 +1,7 @@
 # sonosify
 
+![sonosify banner](static/sonosify_banner.png)
+
 Programmatic Python API for discovering and controlling Sonos speakers on a local network.
 
 This package ports the API core of `steipete/sonoscli` into Python. An optional

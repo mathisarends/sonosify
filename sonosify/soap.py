@@ -9,7 +9,7 @@ from sonosify.errors import UPnPError
 
 _SOAP_ENV_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 
-logger = logging.getLogger("sonosify.soap")
+logger = logging.getLogger(__name__)
 
 
 def build_envelope(

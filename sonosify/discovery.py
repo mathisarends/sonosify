@@ -88,7 +88,7 @@ async def discover(
             if any(not s.invisible for s in group.members)
         )
 
-    return SonosSystem(speakers=speakers, groups=groups, timeout=timeout)
+    return SonosSystem(speakers, groups, timeout)
 
 
 async def _ssdp_locations(timeout: float) -> set[str]:

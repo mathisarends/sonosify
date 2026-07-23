@@ -20,7 +20,6 @@ from .events import (
     SonosEvent,
     TransportState,
     UnknownSonosEvent,
-    parse_last_change,
     parse_notify_event,
 )
 from .models import Favorite, Group, PlaybackState, Speaker, Track
@@ -57,7 +56,6 @@ __all__ = [
     "UPnPError",
     "UnsupportedFeatureError",
     "discover",
-    "parse_last_change",
     "parse_notify_event",
     "parse_favorites",
     "parse_track_id",

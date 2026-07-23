@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from sonosify import Favorite, SonosClient
 
 
@@ -42,3 +44,15 @@ def test_open_falls_back_to_play_uri() -> None:
             {"uri": "https://example.com/live.mp3", "title": "Radio", "radio": True},
         )
     ]
+
+
+def test_client_identity_is_read_only() -> None:
+    client = SonosClient("127.0.0.1", port=1400, uid="RINCON_1")
+
+    assert (client.ip, client.port, client.uid) == ("127.0.0.1", 1400, "RINCON_1")
+    with pytest.raises(AttributeError):
+        client.ip = "127.0.0.2"  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        client.unexpected = True  # type: ignore[attr-defined]
+
+    asyncio.run(client.close())
