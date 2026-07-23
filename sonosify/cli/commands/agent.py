@@ -4,7 +4,7 @@ from typer.main import get_command
 
 from sonosify.cli._dependencies import typer
 from sonosify.cli.output import print_object, print_records
-from sonosify.cli.parameters import IpOpt, RoomArg
+from sonosify.cli.parameters import IpOpt, RoomArg, RoomOpt, target_room
 from sonosify.cli.runtime import async_command, client_for
 
 
@@ -15,10 +15,10 @@ def register(app: typer.Typer) -> None:
 
 
 @async_command
-async def ping(room: RoomArg = None, ip: IpOpt = None) -> None:
+async def ping(target: RoomArg = None, ip: IpOpt = None, room: RoomOpt = None) -> None:
     """Check whether a speaker responds and report latency."""
     started = time.perf_counter()
-    async with client_for(room, ip, coordinator=False) as client:
+    async with client_for(target_room(target, room), ip, coordinator=False) as client:
         room_name = await client.get_room_name()
         address = client.ip
     latency_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -32,10 +32,12 @@ async def ping(room: RoomArg = None, ip: IpOpt = None) -> None:
 
 
 @async_command
-async def doctor(room: RoomArg = None, ip: IpOpt = None) -> None:
+async def doctor(
+    target: RoomArg = None, ip: IpOpt = None, room: RoomOpt = None
+) -> None:
     """Run a speaker connectivity and basic service check."""
     started = time.perf_counter()
-    async with client_for(room, ip, coordinator=False) as client:
+    async with client_for(target_room(target, room), ip, coordinator=False) as client:
         room_name = await client.get_room_name()
         volume = await client.get_volume()
         address = client.ip

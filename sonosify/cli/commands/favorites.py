@@ -3,7 +3,7 @@ from typing import Annotated
 from sonosify.cli._dependencies import Table, typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_action, print_records
-from sonosify.cli.parameters import IpOpt, RoomArg
+from sonosify.cli.parameters import IpOpt, RoomArg, RoomOpt, target_room
 from sonosify.cli.runtime import async_command, client_for
 from sonosify.errors import SonosifyError
 
@@ -12,9 +12,11 @@ app = typer.Typer(help="List and play Sonos favorites.", no_args_is_help=True)
 
 @app.command("list")
 @async_command
-async def list_favorites(room: RoomArg = None, ip: IpOpt = None) -> None:
+async def list_favorites(
+    target: RoomArg = None, ip: IpOpt = None, room: RoomOpt = None
+) -> None:
     """List the Sonos favorites available to a speaker."""
-    async with client_for(room, ip) as client:
+    async with client_for(target_room(target, room), ip) as client:
         favorites = await client.favorites()
     records: list[dict[str, object]] = [
         {"index": index, "title": favorite.title}
@@ -43,9 +45,10 @@ async def play_favorite(
     ],
     room: RoomArg = None,
     ip: IpOpt = None,
+    room_option: RoomOpt = None,
 ) -> None:
     """Play a favorite by name on a speaker."""
-    async with client_for(room, ip) as client:
+    async with client_for(target_room(room, room_option), ip) as client:
         favorites = await client.favorites()
         needle = name.casefold()
         matches = [

@@ -8,7 +8,7 @@ from sonosify import SonosController, SonosSystem
 from sonosify.cli._dependencies import Table, typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_object, print_records
-from sonosify.cli.parameters import IpOpt, RoomArg
+from sonosify.cli.parameters import IpOpt, RoomArg, RoomOpt, target_room
 from sonosify.cli.runtime import async_command, client_for
 from sonosify.cli.settings import resolve_target, save_speaker_cache
 from sonosify.cli.state import OutputFormat, state
@@ -63,9 +63,11 @@ async def discover(
 
 
 @async_command
-async def now_playing(room: RoomArg = None, ip: IpOpt = None) -> None:
+async def now_playing(
+    target: RoomArg = None, ip: IpOpt = None, room: RoomOpt = None
+) -> None:
     """Show what is currently playing on a speaker."""
-    async with client_for(room, ip) as client:
+    async with client_for(target_room(target, room), ip) as client:
         playback = await client.now_playing()
     track = playback.track
     data: dict[str, object] = {
@@ -118,9 +120,11 @@ def duration_seconds(value: str | None) -> float | None:
 
 
 @async_command
-async def status(room: RoomArg = None, ip: IpOpt = None) -> None:
+async def status(
+    target: RoomArg = None, ip: IpOpt = None, room: RoomOpt = None
+) -> None:
     """Return playback, volume, and mute state in one request."""
-    async with client_for(room, ip) as client:
+    async with client_for(target_room(target, room), ip) as client:
         playback, volume, muted = await asyncio.gather(
             client.now_playing(),
             client.get_volume(),
@@ -151,8 +155,9 @@ async def status(room: RoomArg = None, ip: IpOpt = None) -> None:
 
 @async_command
 async def watch(
-    room: RoomArg = None,
+    target: RoomArg = None,
     ip: IpOpt = None,
+    room: RoomOpt = None,
     count: Annotated[
         int | None, typer.Option("--count", min=1, help="Stop after N events.")
     ] = None,
@@ -169,9 +174,9 @@ async def watch(
     limit = duration_seconds(duration)
 
     async def consume() -> None:
-        target_room, target_ip = resolve_target(room, ip)
+        selected_room, target_ip = resolve_target(target_room(target, room), ip)
         controller = SonosController(timeout=state.timeout)
-        async with controller.watch(target_room, ip=target_ip) as watcher:
+        async with controller.watch(selected_room, ip=target_ip) as watcher:
             typer.echo(f"watching {watcher.ip}", err=True)
             seen = 0
             async for event in watcher:

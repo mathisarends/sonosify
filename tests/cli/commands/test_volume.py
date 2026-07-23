@@ -101,3 +101,18 @@ def test_mute_with_explicit_flag_sets_state(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert result.exit_code == 0
     assert client.calls == [("set_mute", False)]
+
+
+def test_explicit_volume_commands_support_room_option(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _Client()
+    seen_rooms = _with_client(monkeypatch, client)
+
+    get_result = CliRunner().invoke(app, ["get-volume", "--room", "Kitchen"])
+    set_result = CliRunner().invoke(app, ["set-volume", "30", "--room", "Kitchen"])
+
+    assert get_result.exit_code == 0
+    assert set_result.exit_code == 0
+    assert client.calls == [("get_volume", None), ("set_volume", 30)]
+    assert seen_rooms == ["Kitchen", "Kitchen"]

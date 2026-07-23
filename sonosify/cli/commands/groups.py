@@ -5,7 +5,7 @@ from sonosify import SonosClient, SonosController
 from sonosify.cli._dependencies import Table, typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_action, print_records
-from sonosify.cli.parameters import IpOpt, RoomArg
+from sonosify.cli.parameters import IpOpt, RoomArg, RoomOpt, target_room
 from sonosify.cli.runtime import async_command, client_for
 from sonosify.cli.state import state
 
@@ -72,8 +72,10 @@ async def group(
 
 
 @async_command
-async def ungroup(room: RoomArg = None, ip: IpOpt = None) -> None:
+async def ungroup(
+    target: RoomArg = None, ip: IpOpt = None, room: RoomOpt = None
+) -> None:
     """Remove a room from its current group."""
-    async with client_for(room, ip, coordinator=False) as client:
+    async with client_for(target_room(target, room), ip, coordinator=False) as client:
         await client.unjoin()
     print_action("[green]ungrouped[/]", {"status": "ungrouped"})

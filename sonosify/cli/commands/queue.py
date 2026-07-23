@@ -3,7 +3,7 @@ from typing import Annotated
 from sonosify.cli._dependencies import Table, typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_action, print_records
-from sonosify.cli.parameters import IpOpt, RoomArg, RoomOpt
+from sonosify.cli.parameters import IpOpt, RoomArg, RoomOpt, target_room
 from sonosify.cli.runtime import async_command, client_for
 
 app = typer.Typer(
@@ -50,9 +50,11 @@ async def queue(
 
 @app.command("clear")
 @async_command
-async def clear_queue(room: RoomArg = None, ip: IpOpt = None) -> None:
+async def clear_queue(
+    target: RoomArg = None, ip: IpOpt = None, room: RoomOpt = None
+) -> None:
     """Remove every item from the queue."""
-    async with client_for(room, ip) as client:
+    async with client_for(target_room(target, room), ip) as client:
         await client.clear_queue()
     print_action("[green]queue cleared[/]", {"status": "cleared"})
 
@@ -63,9 +65,10 @@ async def remove_queue_item(
     position: Annotated[int, typer.Argument(min=1, help="Queue position to remove.")],
     room: RoomArg = None,
     ip: IpOpt = None,
+    room_option: RoomOpt = None,
 ) -> None:
     """Remove one queue item by its one-based position."""
-    async with client_for(room, ip) as client:
+    async with client_for(target_room(room, room_option), ip) as client:
         await client.remove_queue_item(position)
     print_action("[green]queue item removed[/]", {"position": position})
 
@@ -76,9 +79,10 @@ async def jump_queue(
     position: Annotated[int, typer.Argument(min=1, help="Queue position to play.")],
     room: RoomArg = None,
     ip: IpOpt = None,
+    room_option: RoomOpt = None,
 ) -> None:
     """Jump to and play one queue item."""
-    async with client_for(room, ip) as client:
+    async with client_for(target_room(room, room_option), ip) as client:
         await client.seek_queue(position)
         await client.play()
     print_action("[green]queue position playing[/]", {"position": position})
