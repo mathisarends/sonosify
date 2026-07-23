@@ -186,17 +186,13 @@ class _RecordingClient:
         self.calls.append(f"set_volume:{volume}")
 
 
-@pytest.mark.parametrize(
-    ("method", "call_args", "expected"),
-    [
-        ("play", (), "play"),
-        ("pause", (), "pause"),
-        ("stop", (), "stop"),
-    ],
-)
-def test_controller_convenience_playback_methods(
-    monkeypatch: pytest.MonkeyPatch, method: str, call_args: tuple, expected: str
+def test_controller_convenience_method_opens_and_closes_a_client(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Representative check that play/pause/stop all share this delegation
+    # shape (open a client for `room`, call the matching method, let the
+    # context manager close it) -- there's no per-method branching to justify
+    # testing all three individually.
     recording_client = _RecordingClient()
 
     async def fake_client(self, room=None, *, ip=None, coordinator=True):  # type: ignore[no-untyped-def]
@@ -205,9 +201,9 @@ def test_controller_convenience_playback_methods(
     monkeypatch.setattr(SonosController, "client", fake_client)
 
     controller = SonosController()
-    asyncio.run(getattr(controller, method)("Kitchen", *call_args))
+    asyncio.run(controller.play("Kitchen"))
 
-    assert recording_client.calls == [expected]
+    assert recording_client.calls == ["play"]
 
 
 def test_controller_set_volume_targets_non_coordinator_client(

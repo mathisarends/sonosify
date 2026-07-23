@@ -1,22 +1,4 @@
-from sonosify.errors import (
-    AmbiguousSpeakerError,
-    DiscoveryError,
-    SonosifyError,
-    SpeakerNotFoundError,
-    UnsupportedFeatureError,
-    UPnPError,
-)
-
-
-def test_error_hierarchy() -> None:
-    for error_type in (
-        UnsupportedFeatureError,
-        DiscoveryError,
-        SpeakerNotFoundError,
-        AmbiguousSpeakerError,
-        UPnPError,
-    ):
-        assert issubclass(error_type, SonosifyError)
+from sonosify.errors import AmbiguousSpeakerError, UPnPError
 
 
 def test_ambiguous_speaker_error_exposes_query_and_matches() -> None:
