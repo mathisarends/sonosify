@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from typing import Any, Self
 from urllib.parse import quote, urlparse
@@ -25,6 +24,9 @@ from sonosify.cloud.models import (
     Household,
     VolumeState,
 )
+from sonosify.cloud.settings import CloudSettings
+
+__all__ = ["SonosCloudClient"]
 
 _CONTROL_API_URL = "https://api.ws.sonos.com/control/api/v1"
 _APP_ID_ENV = "SONOSIFY_CLOUD_APP_ID"
@@ -35,8 +37,6 @@ def _segment(value: str) -> str:
 
 
 class SonosCloudClient:
-    """Async high-level client for the Sonos Control API."""
-
     def __init__(
         self,
         auth: SonosCloudAuth,
@@ -47,7 +47,7 @@ class SonosCloudClient:
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._auth = auth
-        self._app_id = app_id or os.environ.get(_APP_ID_ENV)
+        self._app_id = app_id or CloudSettings().app_id
         self._owns_client = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=timeout)
         self._base_url = base_url.rstrip("/")

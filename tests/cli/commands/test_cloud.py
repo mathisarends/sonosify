@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -16,7 +17,8 @@ REDIRECT_URI_ENV = "SONOSIFY_CLOUD_REDIRECT_URI"
 
 
 @pytest.fixture(autouse=True)
-def _clear_cloud_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+def _clear_cloud_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
     for name in (CLIENT_ID_ENV, CLIENT_SECRET_ENV, REDIRECT_URI_ENV):
         monkeypatch.delenv(name, raising=False)
 

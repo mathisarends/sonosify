@@ -65,6 +65,7 @@ uv run pytest
 ## Project layout
 
 - `sonosify/` — the core async library (discovery, client, events, models)
+- `sonosify/cloud/` — OAuth2 and Sonos Control API client, models, and errors
 - `sonosify/cli/` — the optional Typer-based CLI, one module per command group
   under `sonosify/cli/commands/`
 - `examples/` — small runnable scripts demonstrating the core API

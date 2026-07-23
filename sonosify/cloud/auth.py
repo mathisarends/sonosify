@@ -16,6 +16,9 @@ from sonosify.cloud.errors import (
     CloudConfigurationError,
 )
 from sonosify.cloud.models import OAuthToken
+from sonosify.cloud.settings import CloudSettings
+
+__all__ = ["SonosCloudAuth"]
 
 _AUTHORIZATION_URL = "https://api.sonos.com/login/v3/oauth"
 _TOKEN_URL = "https://api.sonos.com/login/v3/oauth/access"
@@ -28,10 +31,9 @@ _ACCESS_TOKEN_ENV = "SONOSIFY_CLOUD_ACCESS_TOKEN"
 _TOKEN_CACHE_ENV = "SONOSIFY_CLOUD_TOKEN_CACHE"
 
 
-def _default_token_cache_path() -> Path:
-    override = os.environ.get(_TOKEN_CACHE_ENV)
+def _default_token_cache_path(override: Path | None = None) -> Path:
     if override:
-        return Path(override).expanduser()
+        return override.expanduser()
     if os.name == "nt" and (appdata := os.environ.get("APPDATA")):
         return Path(appdata) / "sonosify" / "cloud-token.json"
     config_home = os.environ.get("XDG_CONFIG_HOME")
@@ -52,17 +54,29 @@ class SonosCloudAuth:
         token_cache_path: Path | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.client_id = client_id or os.environ.get(_CLIENT_ID_ENV)
-        self.client_secret = client_secret or os.environ.get(_CLIENT_SECRET_ENV)
-        self.redirect_uri = redirect_uri or os.environ.get(_REDIRECT_URI_ENV)
-        self._environment_token = access_token or os.environ.get(_ACCESS_TOKEN_ENV)
-        self.token_cache_path = token_cache_path or _default_token_cache_path()
+        settings = CloudSettings()
+        settings_secret = (
+            settings.client_secret.get_secret_value()
+            if settings.client_secret is not None
+            else None
+        )
+        settings_token = (
+            settings.access_token.get_secret_value()
+            if settings.access_token is not None
+            else None
+        )
+        self._client_id = client_id or settings.client_id
+        self._client_secret = client_secret or settings_secret
+        self._redirect_uri = redirect_uri or settings.redirect_uri
+        self._environment_token = access_token or settings_token
+        self.token_cache_path = token_cache_path or _default_token_cache_path(
+            settings.token_cache
+        )
         self._http = http_client
         self._refresh_lock = asyncio.Lock()
 
     @classmethod
     def from_environment(cls) -> SonosCloudAuth:
-        """Create an auth manager using the documented SONOSIFY_CLOUD_* variables."""
         return cls()
 
     def get_authorization_url(self, state: str | None = None) -> str:
@@ -70,11 +84,11 @@ class SonosCloudAuth:
         self._require(_CLIENT_ID_ENV, _REDIRECT_URI_ENV)
         query = urlencode(
             {
-                "client_id": self.client_id,
+                "client_id": self._client_id,
                 "response_type": "code",
                 "state": state or secrets.token_urlsafe(32),
                 "scope": _DEFAULT_SCOPE,
-                "redirect_uri": self.redirect_uri,
+                "redirect_uri": self._redirect_uri,
             }
         )
         return f"{_AUTHORIZATION_URL}?{query}"
@@ -86,7 +100,7 @@ class SonosCloudAuth:
             {
                 "grant_type": "authorization_code",
                 "code": code,
-                "redirect_uri": self.redirect_uri,
+                "redirect_uri": self._redirect_uri,
             }
         )
         self.save_token(token)
@@ -148,30 +162,30 @@ class SonosCloudAuth:
 
     def _require(self, *names: str) -> None:
         values = {
-            _CLIENT_ID_ENV: self.client_id,
-            _CLIENT_SECRET_ENV: self.client_secret,
-            _REDIRECT_URI_ENV: self.redirect_uri,
+            _CLIENT_ID_ENV: self._client_id,
+            _CLIENT_SECRET_ENV: self._client_secret,
+            _REDIRECT_URI_ENV: self._redirect_uri,
         }
         missing = [name for name in names if not values.get(name)]
         if missing:
             raise CloudConfigurationError(*missing)
 
     async def _request_token(self, data: dict[str, Any]) -> OAuthToken:
-        assert self.client_id is not None
-        assert self.client_secret is not None
+        assert self._client_id is not None
+        assert self._client_secret is not None
         try:
             if self._http is not None:
                 response = await self._http.post(
                     _TOKEN_URL,
                     data=data,
-                    auth=(self.client_id, self.client_secret),
+                    auth=(self._client_id, self._client_secret),
                 )
             else:
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     response = await client.post(
                         _TOKEN_URL,
                         data=data,
-                        auth=(self.client_id, self.client_secret),
+                        auth=(self._client_id, self._client_secret),
                     )
             response.raise_for_status()
             payload = response.json()

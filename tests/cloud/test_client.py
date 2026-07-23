@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -12,6 +13,19 @@ from sonosify.cloud import (
     SonosCloudAuth,
     SonosCloudClient,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "SONOSIFY_CLOUD_ACCESS_TOKEN",
+        "SONOSIFY_CLOUD_APP_ID",
+        "SONOSIFY_CLOUD_CLIENT_ID",
+        "SONOSIFY_CLOUD_CLIENT_SECRET",
+        "SONOSIFY_CLOUD_REDIRECT_URI",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _auth() -> SonosCloudAuth:

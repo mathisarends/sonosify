@@ -15,6 +15,9 @@ layers you can use independently:
 
 - **Core library** (`sonosify`): an async Python API for discovery, playback,
   volume, queue, groups, favorites, and live UPnP event subscriptions.
+- **Cloud API** (`sonosify.cloud`): OAuth2 and async access to the Sonos Control
+  API, including Audio Clips with automatic ducking. It is part of the main
+  package and adds no separate install extra.
 - **CLI** (`sonosify` command, via the `cli` extra): a scriptable, JSON-first
   command-line interface designed to be driven by humans and automation/agents
   alike.
@@ -92,6 +95,86 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Sonos Control API (`sonosify.cloud`)
+
+Cloud control is a regular submodule of the main package; there is no separate
+extra to install. Create Control API credentials and register a publicly
+routable HTTPS redirect URI in the
+[Sonos integration manager](https://integration.sonos.com/). Sonos requires the
+redirect URI to exactly match a URI registered for the integration.
+
+Copy `.env.example` to `.env` and fill in the credentials. Configuration is
+loaded through `pydantic-settings`; process environment variables take
+precedence over `.env`.
+
+```powershell
+Copy-Item .env.example .env
+```
+
+The reusable API also accepts credentials explicitly:
+
+```python
+import asyncio
+
+from sonosify.cloud import SonosCloudAuth, SonosCloudClient
+
+
+async def main():
+    auth = SonosCloudAuth(
+        client_id="YOUR_CLIENT_ID",
+        client_secret="YOUR_CLIENT_SECRET",
+        redirect_uri="https://agent.example.com/oauth/sonos",
+    )
+
+    # Exchange the callback's authorization code once:
+    # await auth.async_exchange_code("CODE_FROM_CALLBACK")
+
+    async with SonosCloudClient(auth, app_id="com.example.voice-agent") as sonos:
+        clip = await sonos.load_audio_clip(
+            "RINCON_12345678901400:1",
+            "http://192.168.1.50:8000/tts/response.mp3",
+            name="Agent Voice",
+            volume=30,
+        )
+        print(clip.id)
+
+
+asyncio.run(main())
+```
+
+`SonosCloudAuth` builds authorization URLs, exchanges authorization codes,
+caches access/refresh tokens in the platform config directory, and refreshes
+expired tokens. `SonosCloudClient` exposes households, groups and players;
+player/group lookup by name; Audio Clips; playback controls, status, metadata
+and seek; player/group volume; and home-theater Night Mode/Speech Enhancement.
+
+Only the supported classes, models, enums, and errors are exported from
+`sonosify.cloud`. Endpoint URLs, OAuth scope values, environment-variable
+constants, settings implementation, and cache-path selection remain private.
+
+### Cloud CLI configuration
+
+The `cloud` command group is always present when the CLI is installed:
+
+```powershell
+sonosify cloud auth-url
+# Complete authorization, then pass the code received at the redirect URI:
+sonosify cloud login AUTHORIZATION_CODE
+
+sonosify cloud households
+sonosify cloud groups
+sonosify cloud players
+sonosify cloud clip "http://192.168.1.50:8000/tts/response.mp3" --player Kitchen --voice --volume 30
+sonosify cloud pause --group Kitchen
+sonosify cloud play --group Kitchen
+```
+
+`SONOSIFY_CLOUD_ACCESS_TOKEN` can replace the login/token-cache flow for
+short-lived automation. The client secret is never written to the token cache
+and must remain available whenever an expired token needs refreshing. Missing
+configuration produces a typed `CloudConfigurationError`; JSON CLI output
+includes a `missing` list and never includes credentials or tokens.
 
 `SonosClient` covers transport control (`play`, `pause`, `stop`, `next`,
 `previous`, `seek`), volume/mute (`get_volume`, `set_volume`, `adjust_volume`,
@@ -187,6 +270,8 @@ sonosify groups --format json
 sonosify ping --room Kitchen --format json
 sonosify doctor --room Kitchen --format json
 sonosify watch --room Kitchen --count 5 --format json
+sonosify cloud players --format json
+sonosify cloud clip "http://192.168.1.50:8000/tts/response.mp3" --player Kitchen
 sonosify commands --format json
 sonosify --version --format json
 ```

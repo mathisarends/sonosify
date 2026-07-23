@@ -20,7 +20,8 @@ TOKEN_URL = "https://api.sonos.com/login/v3/oauth/access"
 
 
 @pytest.fixture(autouse=True)
-def _clear_cloud_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+def _clear_cloud_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
     for name in (
         ACCESS_TOKEN_ENV,
         CLIENT_ID_ENV,
@@ -107,6 +108,31 @@ def test_get_valid_token_uses_environment_without_client_credentials(
     token = asyncio.run(SonosCloudAuth.from_environment().async_get_valid_token())
 
     assert token == "temporary-token"
+
+
+def test_from_environment_loads_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            (
+                "SONOSIFY_CLOUD_CLIENT_ID=dotenv-client",
+                "SONOSIFY_CLOUD_CLIENT_SECRET=dotenv-secret",
+                "SONOSIFY_CLOUD_REDIRECT_URI=https://example.test/callback",
+                "SONOSIFY_CLOUD_ACCESS_TOKEN=dotenv-token",
+                "SONOSIFY_CLOUD_TOKEN_CACHE=./tokens/cloud.json",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    auth = SonosCloudAuth.from_environment()
+
+    query = parse_qs(urlparse(auth.get_authorization_url("state")).query)
+    assert query["client_id"] == ["dotenv-client"]
+    assert query["redirect_uri"] == ["https://example.test/callback"]
+    assert auth.token_cache_path == Path("tokens/cloud.json")
+    assert asyncio.run(auth.async_get_valid_token()) == "dotenv-token"
 
 
 def test_expired_cached_token_is_refreshed_and_rotation_is_optional(

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import secrets
 from typing import Annotated
 
@@ -15,6 +14,7 @@ from sonosify.cloud import (
     SonosCloudAuth,
     SonosCloudClient,
 )
+from sonosify.cloud.settings import CloudSettings
 
 _HOUSEHOLD_ID_ENV = "SONOSIFY_CLOUD_HOUSEHOLD_ID"
 
@@ -25,7 +25,7 @@ app = typer.Typer(
 
 
 def _household_id(value: str | None) -> str | None:
-    return value or os.environ.get(_HOUSEHOLD_ID_ENV)
+    return value or CloudSettings().household_id
 
 
 async def _group_id(
