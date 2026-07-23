@@ -13,6 +13,10 @@ class DiscoveryError(SonosifyError):
     pass
 
 
+class NetworkError(SonosifyError):
+    pass
+
+
 class SpeakerNotFoundError(SonosifyError):
     __slots__ = ("_query",)
 

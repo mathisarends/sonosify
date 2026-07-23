@@ -11,6 +11,7 @@ from .discovery import DEFAULT_DISCOVERY_TIMEOUT, discover
 from .errors import (
     AmbiguousSpeakerError,
     DiscoveryError,
+    NetworkError,
     SonosifyError,
     SpeakerNotFoundError,
     UnsupportedFeatureError,
@@ -42,6 +43,7 @@ __all__ = [
     "EventService",
     "EventSubscription",
     "KnownSonosEvent",
+    "NetworkError",
     "Favorite",
     "Group",
     "PlaybackState",

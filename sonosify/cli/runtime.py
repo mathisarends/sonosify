@@ -13,6 +13,7 @@ from sonosify.cli.state import OutputFormat, state
 from sonosify.errors import (
     AmbiguousSpeakerError,
     DiscoveryError,
+    NetworkError,
     SonosifyError,
     SpeakerNotFoundError,
     UPnPError,
@@ -22,12 +23,13 @@ EXIT_CODES = {
     SpeakerNotFoundError: 2,
     AmbiguousSpeakerError: 3,
     DiscoveryError: 4,
+    NetworkError: 4,
     UPnPError: 5,
 }
 
 
 def error_details(exc: SonosifyError) -> dict[str, object]:
-    data: dict[str, object] = {"error": str(exc)}
+    data: dict[str, object] = {"schema_version": 1, "error": str(exc)}
     match exc:
         case AmbiguousSpeakerError():
             data.update(
@@ -39,6 +41,8 @@ def error_details(exc: SonosifyError) -> dict[str, object]:
                 data["query"] = exc.query
         case DiscoveryError():
             data.update(code="discovery_error")
+        case NetworkError():
+            data.update(code="network_error")
         case UPnPError():
             data.update(
                 code="upnp_error",

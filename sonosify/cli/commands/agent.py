@@ -58,24 +58,29 @@ def commands_command() -> None:
 
     root = get_command(app)
     records: list[dict[str, object]] = []
-    for name, command in sorted(root.commands.items()):
-        parameters = []
-        for parameter in command.params:
-            parameters.append(
-                {
-                    "name": parameter.name,
-                    "kind": parameter.param_type_name,
-                    "required": parameter.required,
-                    "options": list(getattr(parameter, "opts", ())),
-                }
-            )
+
+    def collect(prefix: str, command) -> None:  # type: ignore[no-untyped-def]
+        parameters = [
+            {
+                "name": parameter.name,
+                "kind": parameter.param_type_name,
+                "required": parameter.required,
+                "options": list(getattr(parameter, "opts", ())),
+            }
+            for parameter in command.params
+        ]
         records.append(
             {
-                "name": name,
+                "name": prefix,
                 "description": (command.help or "").strip(),
                 "parameters": parameters,
             }
         )
+        for child_name, child in sorted(getattr(command, "commands", {}).items()):
+            collect(f"{prefix} {child_name}", child)
+
+    for name, command in sorted(root.commands.items()):
+        collect(name, command)
     print_records(
         records, ["name", "description", "parameters"], lambda: _plain(records)
     )

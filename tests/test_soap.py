@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import pytest
 
-from sonosify.errors import UPnPError
+from sonosify.errors import NetworkError, UPnPError
 from sonosify.soap import build_envelope, parse_response, parse_upnp_error, soap_call
 
 
@@ -112,4 +112,16 @@ def test_soap_call_raises_http_error_for_unparseable_server_error() -> None:
             await soap_call(client, "http://host/Control", "urn:test", "Play")
 
     with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(run())
+
+
+def test_soap_call_translates_network_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("timed out", request=request)
+
+    async def run() -> None:
+        async with _client(httpx.MockTransport(handler)) as client:
+            await soap_call(client, "http://host/Control", "urn:test", "Play")
+
+    with pytest.raises(NetworkError, match="timed out"):
         asyncio.run(run())

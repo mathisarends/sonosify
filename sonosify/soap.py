@@ -5,7 +5,7 @@ from xml.etree import ElementTree
 
 import httpx
 
-from sonosify.errors import UPnPError
+from sonosify.errors import NetworkError, UPnPError
 
 _SOAP_ENV_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 
@@ -72,14 +72,19 @@ async def soap_call(
 ) -> dict[str, str]:
     envelope = build_envelope(service_urn, action, args)
     logger.debug("-> POST %s %s#%s\n%s", endpoint_url, service_urn, action, envelope)
-    response = await client.post(
-        endpoint_url,
-        content=envelope,
-        headers={
-            "Content-Type": 'text/xml; charset="utf-8"',
-            "SOAPACTION": f'"{service_urn}#{action}"',
-        },
-    )
+    try:
+        response = await client.post(
+            endpoint_url,
+            content=envelope,
+            headers={
+                "Content-Type": 'text/xml; charset="utf-8"',
+                "SOAPACTION": f'"{service_urn}#{action}"',
+            },
+        )
+    except httpx.TimeoutException as exc:
+        raise NetworkError(f"request to {endpoint_url} timed out") from exc
+    except httpx.RequestError as exc:
+        raise NetworkError(f"request to {endpoint_url} failed: {exc}") from exc
     logger.debug(
         "<- %s %s#%s\n%s", response.status_code, service_urn, action, response.text
     )
