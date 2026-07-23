@@ -96,28 +96,49 @@ async def main():
 asyncio.run(main())
 ```
 
-## Sonos Control API (`sonosify.cloud`)
+## Setting up cloud credentials
 
-Cloud control is a regular submodule of the main package; there is no separate
-extra to install. Create Control API credentials and register a publicly
-routable HTTPS redirect URI in the
-[Sonos integration manager](https://integration.sonos.com/). Sonos requires the
-redirect URI to exactly match a URI registered for the integration.
+The Sonos Control API (`sonosify.cloud`) talks to Sonos's cloud service instead
+of your local network, so it needs its own OAuth2 credentials. Get them from
+the [Sonos Developer Platform](https://developer.sonos.com/):
 
-Copy `.env.example` to `.env` and fill in the credentials. Configuration is
-loaded through `pydantic-settings`; process environment variables take
-precedence over `.env`.
+1. Sign in at the [Sonos integration manager](https://integration.sonos.com/)
+   and create a new integration.
+2. Register a publicly routable **HTTPS** redirect URI. Sonos requires it to
+   exactly match the URI your app uses to complete the OAuth flow.
+3. Copy the generated **Client ID** and **Client Secret**.
+
+Compared to the local UPnP-based core library, the Cloud API:
+
+- Works from anywhere, without being on the same network as the speakers —
+  useful for cloud-hosted bots, voice assistants, or remote automation.
+- Supports Audio Clips with automatic ducking, playing short announcements
+  over whatever is currently playing.
+- Is an official, stable API maintained by Sonos, rather than the unofficial
+  UPnP protocol the core library uses.
+
+Once you have credentials, copy `.env.example` to `.env` and fill them in:
 
 ```powershell
 Copy-Item .env.example .env
 ```
+
+Configuration is loaded through `pydantic-settings`; process environment
+variables take precedence over `.env`.
+
+## Sonos Control API (`sonosify.cloud`)
+
+Cloud control is a regular submodule of the main package; there is no separate
+extra to install. See [Setting up cloud credentials](#setting-up-cloud-credentials)
+above to obtain a Client ID, Client Secret, and redirect URI before using it.
 
 The reusable API also accepts credentials explicitly:
 
 ```python
 import asyncio
 
-from sonosify.cloud import SonosCloudAuth, SonosCloudClient
+from sonosify.cloud.auth import SonosCloudAuth
+from sonosify.cloud.client import SonosCloudClient
 
 
 async def main():
@@ -149,9 +170,27 @@ expired tokens. `SonosCloudClient` exposes households, groups and players;
 player/group lookup by name; Audio Clips; playback controls, status, metadata
 and seek; player/group volume; and home-theater Night Mode/Speech Enhancement.
 
-Only the supported classes, models, enums, and errors are exported from
-`sonosify.cloud`. Endpoint URLs, OAuth scope values, environment-variable
-constants, settings implementation, and cache-path selection remain private.
+Token persistence is injectable through `CacheHandler`. The default
+`CacheFileHandler` stores the token with owner-only permissions on POSIX
+systems; `MemoryCacheHandler` is useful for services that manage persistence
+elsewhere or deliberately keep credentials process-local:
+
+```python
+from sonosify.cloud.auth import SonosCloudAuth
+from sonosify.cloud.cache_handler import MemoryCacheHandler
+
+auth = SonosCloudAuth(
+    client_id="YOUR_CLIENT_ID",
+    client_secret="YOUR_CLIENT_SECRET",
+    redirect_uri="https://agent.example.com/oauth/sonos",
+    cache_handler=MemoryCacheHandler(),
+)
+```
+
+Public classes live in the named `sonosify.cloud` modules (`auth`, `client`,
+`cache_handler`, `errors`, and `models`). Names prefixed with `_`, including
+endpoint URLs, OAuth scope values, settings implementation, and cache-path
+selection, are private.
 
 ### Cloud CLI configuration
 

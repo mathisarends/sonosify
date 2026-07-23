@@ -7,14 +7,11 @@ from sonosify.cli._dependencies import Table, typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_action, print_object, print_records
 from sonosify.cli.runtime import async_command
-from sonosify.cloud import (
-    ClipPriority,
-    ClipType,
-    CloudConfigurationError,
-    SonosCloudAuth,
-    SonosCloudClient,
-)
-from sonosify.cloud.settings import CloudSettings
+from sonosify.cloud.auth import SonosCloudAuth
+from sonosify.cloud.client import SonosCloudClient
+from sonosify.cloud.errors import CloudConfigurationError
+from sonosify.cloud.models import ClipPriority, ClipType
+from sonosify.cloud.settings import _CloudSettings
 
 _HOUSEHOLD_ID_ENV = "SONOSIFY_CLOUD_HOUSEHOLD_ID"
 
@@ -25,7 +22,7 @@ app = typer.Typer(
 
 
 def _household_id(value: str | None) -> str | None:
-    return value or CloudSettings().household_id
+    return value or _CloudSettings().household_id
 
 
 async def _group_id(

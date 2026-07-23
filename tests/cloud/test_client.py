@@ -5,14 +5,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-from sonosify.cloud import (
-    ClipPriority,
-    ClipType,
-    CloudAPIError,
-    CloudConfigurationError,
-    SonosCloudAuth,
-    SonosCloudClient,
-)
+from sonosify.cloud.auth import SonosCloudAuth
+from sonosify.cloud.client import SonosCloudClient
+from sonosify.cloud.errors import CloudAPIError, CloudConfigurationError
+from sonosify.cloud.models import ClipPriority, ClipType
 
 
 @pytest.fixture(autouse=True)

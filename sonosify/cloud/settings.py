@@ -3,10 +3,8 @@ from pathlib import Path
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-__all__: list[str] = []
 
-
-class CloudSettings(BaseSettings):
+class _CloudSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

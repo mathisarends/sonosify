@@ -6,11 +6,10 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
-from sonosify.cloud import (
-    CloudConfigurationError,
-    OAuthToken,
-    SonosCloudAuth,
-)
+from sonosify.cloud.auth import SonosCloudAuth
+from sonosify.cloud.cache_handler import MemoryCacheHandler
+from sonosify.cloud.errors import CloudConfigurationError
+from sonosify.cloud.models import OAuthToken
 
 ACCESS_TOKEN_ENV = "SONOSIFY_CLOUD_ACCESS_TOKEN"
 CLIENT_ID_ENV = "SONOSIFY_CLOUD_CLIENT_ID"
@@ -108,6 +107,27 @@ def test_get_valid_token_uses_environment_without_client_credentials(
     token = asyncio.run(SonosCloudAuth.from_environment().async_get_valid_token())
 
     assert token == "temporary-token"
+
+
+def test_auth_accepts_an_injected_memory_cache() -> None:
+    cache = MemoryCacheHandler(
+        OAuthToken(access_token="cached").model_dump(mode="json", by_alias=True)
+    )
+    auth = SonosCloudAuth(cache_handler=cache)
+
+    assert asyncio.run(auth.async_get_valid_token()) == "cached"
+    assert auth.token_cache_path is None
+
+    auth.clear_token()
+    assert cache.get_cached_token() is None
+
+
+def test_cache_handler_and_cache_path_are_mutually_exclusive(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        SonosCloudAuth(
+            token_cache_path=tmp_path / "token.json",
+            cache_handler=MemoryCacheHandler(),
+        )
 
 
 def test_from_environment_loads_dotenv(

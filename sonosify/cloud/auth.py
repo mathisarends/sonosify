@@ -1,24 +1,20 @@
-from __future__ import annotations
-
 import asyncio
-import json
 import os
 import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 from urllib.parse import urlencode
 
 import httpx
 from pydantic import ValidationError
 
+from sonosify.cloud.cache_handler import CacheFileHandler, CacheHandler
 from sonosify.cloud.errors import (
     CloudAuthenticationError,
     CloudConfigurationError,
 )
 from sonosify.cloud.models import OAuthToken
-from sonosify.cloud.settings import CloudSettings
-
-__all__ = ["SonosCloudAuth"]
+from sonosify.cloud.settings import _CloudSettings
 
 _AUTHORIZATION_URL = "https://api.sonos.com/login/v3/oauth"
 _TOKEN_URL = "https://api.sonos.com/login/v3/oauth/access"
@@ -52,9 +48,14 @@ class SonosCloudAuth:
         *,
         access_token: str | None = None,
         token_cache_path: Path | None = None,
+        cache_handler: CacheHandler | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        settings = CloudSettings()
+        if token_cache_path is not None and cache_handler is not None:
+            raise ValueError(
+                "token_cache_path and cache_handler are mutually exclusive"
+            )
+        settings = _CloudSettings()
         settings_secret = (
             settings.client_secret.get_secret_value()
             if settings.client_secret is not None
@@ -69,14 +70,20 @@ class SonosCloudAuth:
         self._client_secret = client_secret or settings_secret
         self._redirect_uri = redirect_uri or settings.redirect_uri
         self._environment_token = access_token or settings_token
-        self.token_cache_path = token_cache_path or _default_token_cache_path(
-            settings.token_cache
+        self.cache_handler = cache_handler or CacheFileHandler(
+            token_cache_path or _default_token_cache_path(settings.token_cache)
         )
         self._http = http_client
         self._refresh_lock = asyncio.Lock()
 
+    @property
+    def token_cache_path(self) -> Path | None:
+        if isinstance(self.cache_handler, CacheFileHandler):
+            return self.cache_handler.cache_path
+        return None
+
     @classmethod
-    def from_environment(cls) -> SonosCloudAuth:
+    def from_environment(cls) -> Self:
         return cls()
 
     def get_authorization_url(self, state: str | None = None) -> str:
@@ -143,22 +150,20 @@ class SonosCloudAuth:
 
     def load_token(self) -> OAuthToken | None:
         try:
-            payload = json.loads(self.token_cache_path.read_text(encoding="utf-8"))
+            payload = self.cache_handler.get_cached_token()
+            if payload is None:
+                return None
             return OAuthToken.model_validate(payload)
-        except (OSError, json.JSONDecodeError, ValidationError):
+        except ValidationError:
             return None
 
     def save_token(self, token: OAuthToken) -> None:
-        self.token_cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self.token_cache_path.write_text(
-            token.model_dump_json(by_alias=True, indent=2),
-            encoding="utf-8",
+        self.cache_handler.save_token_to_cache(
+            token.model_dump(mode="json", by_alias=True)
         )
-        if os.name != "nt":
-            self.token_cache_path.chmod(0o600)
 
     def clear_token(self) -> None:
-        self.token_cache_path.unlink(missing_ok=True)
+        self.cache_handler.clear_cached_token()
 
     def _require(self, *names: str) -> None:
         values = {

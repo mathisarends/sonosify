@@ -24,9 +24,7 @@ from sonosify.cloud.models import (
     Household,
     VolumeState,
 )
-from sonosify.cloud.settings import CloudSettings
-
-__all__ = ["SonosCloudClient"]
+from sonosify.cloud.settings import _CloudSettings
 
 _CONTROL_API_URL = "https://api.ws.sonos.com/control/api/v1"
 _APP_ID_ENV = "SONOSIFY_CLOUD_APP_ID"
@@ -47,7 +45,7 @@ class SonosCloudClient:
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._auth = auth
-        self._app_id = app_id or CloudSettings().app_id
+        self._app_id = app_id or _CloudSettings().app_id
         self._owns_client = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=timeout)
         self._base_url = base_url.rstrip("/")

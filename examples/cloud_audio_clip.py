@@ -1,7 +1,8 @@
 import argparse
 import asyncio
 
-from sonosify.cloud import SonosCloudAuth, SonosCloudClient
+from sonosify.cloud.auth import SonosCloudAuth
+from sonosify.cloud.client import SonosCloudClient
 
 
 async def main(player: str, stream_url: str) -> None:
