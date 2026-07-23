@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Self
 
 import httpx
@@ -20,6 +21,12 @@ _RENDERING_CONTROL = "urn:schemas-upnp-org:service:RenderingControl:1"
 _CONTENT_DIRECTORY = "urn:schemas-upnp-org:service:ContentDirectory:1"
 _DEVICE_PROPERTIES = "urn:schemas-upnp-org:service:DeviceProperties:1"
 _ZONE_GROUP_TOPOLOGY = "urn:schemas-upnp-org:service:ZoneGroupTopology:1"
+
+
+class RepeatMode(StrEnum):
+    OFF = "off"
+    ONE = "one"
+    ALL = "all"
 
 
 class TransportInfo(BaseModel):
@@ -127,6 +134,45 @@ class SonosClient:
 
     async def seek_queue(self, position: int) -> None:
         await self.__av_transport("Seek", Unit="TRACK_NR", Target=str(position))
+
+    async def seek(self, position: str) -> None:
+        """Seek to an ``H:MM:SS`` position within the current track."""
+        await self.__av_transport("Seek", Unit="REL_TIME", Target=position)
+
+    async def get_play_mode(self) -> str:
+        result = await self.__av_transport("GetTransportSettings")
+        return result.get("PlayMode", "NORMAL")
+
+    async def set_play_mode(self, mode: str) -> None:
+        await self.__av_transport("SetPlayMode", NewPlayMode=mode.upper())
+
+    async def set_shuffle(self, enabled: bool) -> str:
+        current = await self.get_play_mode()
+        repeat = self._repeat_from_play_mode(current)
+        mode = self._play_mode(enabled, repeat)
+        await self.set_play_mode(mode)
+        return mode
+
+    async def set_repeat(self, repeat: RepeatMode | str) -> str:
+        repeat = RepeatMode(repeat)
+        current = await self.get_play_mode()
+        mode = self._play_mode(current.startswith("SHUFFLE"), repeat)
+        await self.set_play_mode(mode)
+        return mode
+
+    async def get_crossfade(self) -> bool:
+        result = await self.__av_transport("GetCrossfadeMode")
+        return result.get("CrossfadeMode") == "1"
+
+    async def set_crossfade(self, enabled: bool) -> None:
+        await self.__av_transport(
+            "SetCrossfadeMode", CrossfadeMode="1" if enabled else "0"
+        )
+
+    async def configure_sleep_timer(self, duration: str | None) -> None:
+        await self.__av_transport(
+            "ConfigureSleepTimer", NewSleepTimerDuration=duration or ""
+        )
 
     async def play_uri(self, uri: str, *, title: str = "", radio: bool = False) -> None:
         metadata = radio_metadata(title or uri, uri) if radio else ""
@@ -404,3 +450,25 @@ class SonosClient:
         if self._uid:
             return self._uid
         raise ValueError("line-in playback requires a source Speaker or RINCON uid")
+
+    @staticmethod
+    def _repeat_from_play_mode(mode: str) -> RepeatMode:
+        if mode.endswith("REPEAT_ONE"):
+            return RepeatMode.ONE
+        if mode in {"REPEAT_ALL", "SHUFFLE"}:
+            return RepeatMode.ALL
+        return RepeatMode.OFF
+
+    @staticmethod
+    def _play_mode(shuffle: bool, repeat: RepeatMode) -> str:
+        if shuffle:
+            return {
+                RepeatMode.OFF: "SHUFFLE_NOREPEAT",
+                RepeatMode.ONE: "SHUFFLE_REPEAT_ONE",
+                RepeatMode.ALL: "SHUFFLE",
+            }[repeat]
+        return {
+            RepeatMode.OFF: "NORMAL",
+            RepeatMode.ONE: "REPEAT_ONE",
+            RepeatMode.ALL: "REPEAT_ALL",
+        }[repeat]

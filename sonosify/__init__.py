@@ -1,4 +1,10 @@
-from .client import DEFAULT_TIMEOUT, PositionInfo, SonosClient, TransportInfo
+from .client import (
+    DEFAULT_TIMEOUT,
+    PositionInfo,
+    RepeatMode,
+    SonosClient,
+    TransportInfo,
+)
 from .controller import SonosController
 from .didl import parse_favorites, parse_track_metadata, radio_metadata
 from .discovery import DEFAULT_DISCOVERY_TIMEOUT, discover
@@ -46,6 +52,7 @@ __all__ = [
     "SonosSystem",
     "SonosifyError",
     "RenderingControlEvent",
+    "RepeatMode",
     "Speaker",
     "SpeakerNotFoundError",
     "TrackReference",

@@ -104,6 +104,53 @@ def test_seek_queue_targets_track_number(recorder: _RecordingSoap) -> None:
     }
 
 
+def test_seek_targets_relative_time(recorder: _RecordingSoap) -> None:
+    client = SonosClient("192.168.1.10")
+
+    _run(client.seek("0:01:30"))
+
+    assert recorder.calls[0][3] == {
+        "InstanceID": "0",
+        "Unit": "REL_TIME",
+        "Target": "0:01:30",
+    }
+
+
+def test_shuffle_and_repeat_preserve_each_other(recorder: _RecordingSoap) -> None:
+    recorder._responses["GetTransportSettings"] = {"PlayMode": "REPEAT_ONE"}
+    client = SonosClient("192.168.1.10")
+
+    assert _run(client.set_shuffle(True)) == "SHUFFLE_REPEAT_ONE"
+
+    recorder._responses["GetTransportSettings"] = {"PlayMode": "SHUFFLE"}
+    assert _run(client.set_repeat("off")) == "SHUFFLE_NOREPEAT"
+    set_calls = [call for call in recorder.calls if call[2] == "SetPlayMode"]
+    assert [call[3]["NewPlayMode"] for call in set_calls] == [
+        "SHUFFLE_REPEAT_ONE",
+        "SHUFFLE_NOREPEAT",
+    ]
+
+
+def test_crossfade_get_and_set(recorder: _RecordingSoap) -> None:
+    recorder._responses["GetCrossfadeMode"] = {"CrossfadeMode": "1"}
+    client = SonosClient("192.168.1.10")
+
+    assert _run(client.get_crossfade()) is True
+    _run(client.set_crossfade(False))
+
+    assert recorder.calls[-1][3]["CrossfadeMode"] == "0"
+
+
+def test_configure_sleep_timer(recorder: _RecordingSoap) -> None:
+    client = SonosClient("192.168.1.10")
+
+    _run(client.configure_sleep_timer("0:30:00"))
+    _run(client.configure_sleep_timer(None))
+
+    calls = [call for call in recorder.calls if call[2] == "ConfigureSleepTimer"]
+    assert [call[3]["NewSleepTimerDuration"] for call in calls] == ["0:30:00", ""]
+
+
 def test_play_uri_sets_transport_uri_then_plays(recorder: _RecordingSoap) -> None:
     client = SonosClient("192.168.1.10")
 
