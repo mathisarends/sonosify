@@ -47,7 +47,7 @@ uv pip install -e ".[cli]"
 Setting up a development environment (dependency groups, tests, linting,
 pre-commit) is covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Kern (Core Python API)
+## Core Python API
 
 The core API is fully async and centers on two entry points: `SonosController`
 for household-wide operations (discovery, groups, watching) and `SonosClient`
@@ -135,7 +135,7 @@ uv run python examples/watch.py Kitchen
 uv run python examples/play_radio.py Kitchen https://example.com/live.mp3 "Example Radio"
 ```
 
-## Schnittstelle (Command-line interface)
+## Command-line interface
 
 Install the optional CLI dependencies (Typer + Rich) as shown above, then use
 the `sonosify` command:
