@@ -17,19 +17,19 @@ from sonosify.cloud.errors import (
 )
 from sonosify.cloud.models import OAuthToken
 
-AUTHORIZATION_URL = "https://api.sonos.com/login/v3/oauth"
-TOKEN_URL = "https://api.sonos.com/login/v3/oauth/access"
-DEFAULT_SCOPE = "playback-control-all"
+_AUTHORIZATION_URL = "https://api.sonos.com/login/v3/oauth"
+_TOKEN_URL = "https://api.sonos.com/login/v3/oauth/access"
+_DEFAULT_SCOPE = "playback-control-all"
 
-CLIENT_ID_ENV = "SONOSIFY_CLOUD_CLIENT_ID"
-CLIENT_SECRET_ENV = "SONOSIFY_CLOUD_CLIENT_SECRET"
-REDIRECT_URI_ENV = "SONOSIFY_CLOUD_REDIRECT_URI"
-ACCESS_TOKEN_ENV = "SONOSIFY_CLOUD_ACCESS_TOKEN"
-TOKEN_CACHE_ENV = "SONOSIFY_CLOUD_TOKEN_CACHE"
+_CLIENT_ID_ENV = "SONOSIFY_CLOUD_CLIENT_ID"
+_CLIENT_SECRET_ENV = "SONOSIFY_CLOUD_CLIENT_SECRET"
+_REDIRECT_URI_ENV = "SONOSIFY_CLOUD_REDIRECT_URI"
+_ACCESS_TOKEN_ENV = "SONOSIFY_CLOUD_ACCESS_TOKEN"
+_TOKEN_CACHE_ENV = "SONOSIFY_CLOUD_TOKEN_CACHE"
 
 
-def default_token_cache_path() -> Path:
-    override = os.environ.get(TOKEN_CACHE_ENV)
+def _default_token_cache_path() -> Path:
+    override = os.environ.get(_TOKEN_CACHE_ENV)
     if override:
         return Path(override).expanduser()
     if os.name == "nt" and (appdata := os.environ.get("APPDATA")):
@@ -52,11 +52,11 @@ class SonosCloudAuth:
         token_cache_path: Path | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.client_id = client_id or os.environ.get(CLIENT_ID_ENV)
-        self.client_secret = client_secret or os.environ.get(CLIENT_SECRET_ENV)
-        self.redirect_uri = redirect_uri or os.environ.get(REDIRECT_URI_ENV)
-        self._environment_token = access_token or os.environ.get(ACCESS_TOKEN_ENV)
-        self.token_cache_path = token_cache_path or default_token_cache_path()
+        self.client_id = client_id or os.environ.get(_CLIENT_ID_ENV)
+        self.client_secret = client_secret or os.environ.get(_CLIENT_SECRET_ENV)
+        self.redirect_uri = redirect_uri or os.environ.get(_REDIRECT_URI_ENV)
+        self._environment_token = access_token or os.environ.get(_ACCESS_TOKEN_ENV)
+        self.token_cache_path = token_cache_path or _default_token_cache_path()
         self._http = http_client
         self._refresh_lock = asyncio.Lock()
 
@@ -67,21 +67,21 @@ class SonosCloudAuth:
 
     def get_authorization_url(self, state: str | None = None) -> str:
         """Build the Sonos login URL and generate a state value when omitted."""
-        self._require(CLIENT_ID_ENV, REDIRECT_URI_ENV)
+        self._require(_CLIENT_ID_ENV, _REDIRECT_URI_ENV)
         query = urlencode(
             {
                 "client_id": self.client_id,
                 "response_type": "code",
                 "state": state or secrets.token_urlsafe(32),
-                "scope": DEFAULT_SCOPE,
+                "scope": _DEFAULT_SCOPE,
                 "redirect_uri": self.redirect_uri,
             }
         )
-        return f"{AUTHORIZATION_URL}?{query}"
+        return f"{_AUTHORIZATION_URL}?{query}"
 
     async def async_exchange_code(self, code: str) -> OAuthToken:
         """Exchange an authorization code and persist the returned token pair."""
-        self._require(CLIENT_ID_ENV, CLIENT_SECRET_ENV, REDIRECT_URI_ENV)
+        self._require(_CLIENT_ID_ENV, _CLIENT_SECRET_ENV, _REDIRECT_URI_ENV)
         token = await self._request_token(
             {
                 "grant_type": "authorization_code",
@@ -94,12 +94,12 @@ class SonosCloudAuth:
 
     async def async_refresh_token(self, refresh_token: str | None = None) -> OAuthToken:
         """Refresh and persist an OAuth token."""
-        self._require(CLIENT_ID_ENV, CLIENT_SECRET_ENV)
+        self._require(_CLIENT_ID_ENV, _CLIENT_SECRET_ENV)
         previous = self.load_token()
         value = refresh_token or (previous.refresh_token if previous else "")
         if not value:
             raise CloudConfigurationError(
-                f"{TOKEN_CACHE_ENV} (cache containing a refresh token)"
+                f"{_TOKEN_CACHE_ENV} (cache containing a refresh token)"
             )
         token = await self._request_token(
             {"grant_type": "refresh_token", "refresh_token": value}
@@ -123,8 +123,8 @@ class SonosCloudAuth:
             if self._environment_token:
                 return self._environment_token
             raise CloudConfigurationError(
-                ACCESS_TOKEN_ENV,
-                f"{TOKEN_CACHE_ENV} (cache created by `sonosify cloud login`)",
+                _ACCESS_TOKEN_ENV,
+                f"{_TOKEN_CACHE_ENV} (cache created by `sonosify cloud login`)",
             )
 
     def load_token(self) -> OAuthToken | None:
@@ -148,9 +148,9 @@ class SonosCloudAuth:
 
     def _require(self, *names: str) -> None:
         values = {
-            CLIENT_ID_ENV: self.client_id,
-            CLIENT_SECRET_ENV: self.client_secret,
-            REDIRECT_URI_ENV: self.redirect_uri,
+            _CLIENT_ID_ENV: self.client_id,
+            _CLIENT_SECRET_ENV: self.client_secret,
+            _REDIRECT_URI_ENV: self.redirect_uri,
         }
         missing = [name for name in names if not values.get(name)]
         if missing:
@@ -162,14 +162,14 @@ class SonosCloudAuth:
         try:
             if self._http is not None:
                 response = await self._http.post(
-                    TOKEN_URL,
+                    _TOKEN_URL,
                     data=data,
                     auth=(self.client_id, self.client_secret),
                 )
             else:
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     response = await client.post(
-                        TOKEN_URL,
+                        _TOKEN_URL,
                         data=data,
                         auth=(self.client_id, self.client_secret),
                     )

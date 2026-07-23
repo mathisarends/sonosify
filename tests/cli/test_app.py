@@ -23,6 +23,7 @@ def test_command_topology() -> None:
     root = get_command(app)
 
     assert set(root.commands) == {
+        "cloud",
         "commands",
         "config",
         "crossfade",
@@ -59,6 +60,19 @@ def test_command_topology() -> None:
     assert set(root.commands["favorites"].commands) == {"list", "play"}
     assert set(root.commands["config"].commands) == {"clear", "set", "show"}
     assert set(root.commands["queue"].commands) == {"clear", "jump", "remove"}
+    assert set(root.commands["cloud"].commands) == {
+        "auth-url",
+        "clip",
+        "groups",
+        "households",
+        "login",
+        "logout",
+        "next",
+        "pause",
+        "play",
+        "players",
+        "previous",
+    }
 
 
 @pytest.fixture(autouse=True)

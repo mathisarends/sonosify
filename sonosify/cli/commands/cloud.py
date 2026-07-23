@@ -16,7 +16,7 @@ from sonosify.cloud import (
     SonosCloudClient,
 )
 
-HOUSEHOLD_ID_ENV = "SONOSIFY_CLOUD_HOUSEHOLD_ID"
+_HOUSEHOLD_ID_ENV = "SONOSIFY_CLOUD_HOUSEHOLD_ID"
 
 app = typer.Typer(
     help="Use the OAuth-based Sonos Control API.",
@@ -25,7 +25,7 @@ app = typer.Typer(
 
 
 def _household_id(value: str | None) -> str | None:
-    return value or os.environ.get(HOUSEHOLD_ID_ENV)
+    return value or os.environ.get(_HOUSEHOLD_ID_ENV)
 
 
 async def _group_id(
@@ -117,14 +117,14 @@ async def groups(
         typer.Option(
             "--household",
             "-H",
-            help=f"Household ID (or {HOUSEHOLD_ID_ENV}).",
+            help=f"Household ID (or {_HOUSEHOLD_ID_ENV}).",
         ),
     ] = None,
 ) -> None:
     """List cloud groups in a household."""
     household_id = _household_id(household_id)
     if not household_id:
-        raise CloudConfigurationError(HOUSEHOLD_ID_ENV)
+        raise CloudConfigurationError(_HOUSEHOLD_ID_ENV)
     async with SonosCloudClient(SonosCloudAuth.from_environment()) as client:
         topology = await client.get_groups(household_id)
     records = [
@@ -156,7 +156,7 @@ async def players(
         typer.Option(
             "--household",
             "-H",
-            help=f"Limit results to a household (or {HOUSEHOLD_ID_ENV}).",
+            help=f"Limit results to a household (or {_HOUSEHOLD_ID_ENV}).",
         ),
     ] = None,
 ) -> None:
@@ -199,7 +199,7 @@ async def clip(
         typer.Option(
             "--household",
             "-H",
-            help=f"Household used for name lookup (or {HOUSEHOLD_ID_ENV}).",
+            help=f"Household used for name lookup (or {_HOUSEHOLD_ID_ENV}).",
         ),
     ] = None,
     name: Annotated[
@@ -273,7 +273,7 @@ async def play(
         typer.Option(
             "--household",
             "-H",
-            help=f"Name lookup scope ({HOUSEHOLD_ID_ENV}).",
+            help=f"Name lookup scope ({_HOUSEHOLD_ID_ENV}).",
         ),
     ] = None,
 ) -> None:
@@ -292,7 +292,7 @@ async def pause(
         typer.Option(
             "--household",
             "-H",
-            help=f"Name lookup scope ({HOUSEHOLD_ID_ENV}).",
+            help=f"Name lookup scope ({_HOUSEHOLD_ID_ENV}).",
         ),
     ] = None,
 ) -> None:
@@ -311,7 +311,7 @@ async def next_track(
         typer.Option(
             "--household",
             "-H",
-            help=f"Name lookup scope ({HOUSEHOLD_ID_ENV}).",
+            help=f"Name lookup scope ({_HOUSEHOLD_ID_ENV}).",
         ),
     ] = None,
 ) -> None:
@@ -330,7 +330,7 @@ async def previous_track(
         typer.Option(
             "--household",
             "-H",
-            help=f"Name lookup scope ({HOUSEHOLD_ID_ENV}).",
+            help=f"Name lookup scope ({_HOUSEHOLD_ID_ENV}).",
         ),
     ] = None,
 ) -> None:

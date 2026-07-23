@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, override
 
 from sonosify.errors import SonosifyError
 
@@ -6,6 +6,7 @@ from sonosify.errors import SonosifyError
 class SonosCloudError(SonosifyError):
     """Base error for Sonos Control API operations."""
 
+    @override
     def error_details(self) -> dict[str, object]:
         return {"code": "cloud_error"}
 
@@ -20,6 +21,7 @@ class CloudConfigurationError(SonosCloudError):
         names = ", ".join(self.missing)
         super().__init__(f"missing Sonos cloud configuration: {names}")
 
+    @override
     def error_details(self) -> dict[str, object]:
         return {
             "code": "cloud_configuration_error",
@@ -30,6 +32,7 @@ class CloudConfigurationError(SonosCloudError):
 class CloudAuthenticationError(SonosCloudError):
     """Raised when Sonos rejects an OAuth operation."""
 
+    @override
     def error_details(self) -> dict[str, object]:
         return {"code": "cloud_authentication_error"}
 
@@ -37,6 +40,7 @@ class CloudAuthenticationError(SonosCloudError):
 class CloudTargetError(SonosCloudError):
     """Raised when a cloud player/group target cannot be resolved uniquely."""
 
+    @override
     def error_details(self) -> dict[str, object]:
         return {"code": "cloud_target_error"}
 
@@ -44,6 +48,7 @@ class CloudTargetError(SonosCloudError):
 class CloudConnectionError(SonosCloudError):
     """Raised when the Sonos cloud cannot be reached."""
 
+    @override
     def error_details(self) -> dict[str, object]:
         return {"code": "cloud_connection_error"}
 
@@ -68,6 +73,7 @@ class CloudAPIError(SonosCloudError):
             message = f"{message}: {error_code}"
         super().__init__(message)
 
+    @override
     def error_details(self) -> dict[str, object]:
         result: dict[str, object] = {
             "code": "cloud_api_error",

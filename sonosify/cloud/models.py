@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 
-class CloudModel(BaseModel):
+class _CloudModel(BaseModel):
     """Base model tolerant of forward-compatible Sonos response fields."""
 
     model_config = ConfigDict(
@@ -18,7 +18,7 @@ class CloudModel(BaseModel):
     )
 
 
-class OAuthToken(CloudModel):
+class OAuthToken(_CloudModel):
     access_token: str
     refresh_token: str = ""
     token_type: str = "Bearer"
@@ -32,11 +32,11 @@ class OAuthToken(CloudModel):
         return time.time() >= self.obtained_at + self.expires_in - leeway
 
 
-class Household(CloudModel):
+class Household(_CloudModel):
     id: str
 
 
-class CloudPlayer(CloudModel):
+class CloudPlayer(_CloudModel):
     id: str
     name: str
     icon: str = ""
@@ -48,7 +48,7 @@ class CloudPlayer(CloudModel):
     websocket_url: str = Field("", alias="webSocketUrl")
 
 
-class CloudGroup(CloudModel):
+class CloudGroup(_CloudModel):
     id: str
     name: str
     coordinator_id: str
@@ -56,7 +56,7 @@ class CloudGroup(CloudModel):
     playback_state: str = ""
 
 
-class CloudTopology(CloudModel):
+class CloudTopology(_CloudModel):
     groups: tuple[CloudGroup, ...] = ()
     players: tuple[CloudPlayer, ...] = ()
 
@@ -77,7 +77,7 @@ class ClipLEDBehavior(StrEnum):
     WHITE_LED_QUICK_BREATHING = "WHITE_LED_QUICK_BREATHING"
 
 
-class AudioClip(CloudModel):
+class AudioClip(_CloudModel):
     id: str
     name: str
     app_id: str
@@ -87,12 +87,12 @@ class AudioClip(CloudModel):
     error_code: str = ""
 
 
-class VolumeState(CloudModel):
+class VolumeState(_CloudModel):
     volume: int
     muted: bool
     fixed: bool = False
 
 
-class HomeTheaterOptions(CloudModel):
+class HomeTheaterOptions(_CloudModel):
     night_mode: bool | None = None
     enhance_dialog: bool | None = None

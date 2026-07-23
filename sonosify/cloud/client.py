@@ -26,8 +26,8 @@ from sonosify.cloud.models import (
     VolumeState,
 )
 
-CONTROL_API_URL = "https://api.ws.sonos.com/control/api/v1"
-APP_ID_ENV = "SONOSIFY_CLOUD_APP_ID"
+_CONTROL_API_URL = "https://api.ws.sonos.com/control/api/v1"
+_APP_ID_ENV = "SONOSIFY_CLOUD_APP_ID"
 
 
 def _segment(value: str) -> str:
@@ -43,11 +43,11 @@ class SonosCloudClient:
         *,
         app_id: str | None = None,
         timeout: float = 15.0,
-        base_url: str = CONTROL_API_URL,
+        base_url: str = _CONTROL_API_URL,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._auth = auth
-        self._app_id = app_id or os.environ.get(APP_ID_ENV)
+        self._app_id = app_id or os.environ.get(_APP_ID_ENV)
         self._owns_client = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=timeout)
         self._base_url = base_url.rstrip("/")
@@ -146,7 +146,7 @@ class SonosCloudClient:
         """Schedule an MP3/WAV clip, or a built-in chime, on a player."""
         effective_app_id = app_id or self._app_id
         if not effective_app_id:
-            raise CloudConfigurationError(APP_ID_ENV)
+            raise CloudConfigurationError(_APP_ID_ENV)
         if not 1 <= len(name) <= 64:
             raise ValueError("audio clip name must contain 1 to 64 characters")
         if len(effective_app_id) > 127:

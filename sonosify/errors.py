@@ -1,20 +1,30 @@
 from collections.abc import Sequence
+from typing import override
 
 
 class SonosifyError(Exception):
-    pass
+    """Base class for errors that have stable machine-readable CLI details."""
+
+    def error_details(self) -> dict[str, object]:
+        return {"code": "sonosify_error"}
 
 
 class UnsupportedFeatureError(SonosifyError):
-    pass
+    @override
+    def error_details(self) -> dict[str, object]:
+        return {"code": "unsupported_feature"}
 
 
 class DiscoveryError(SonosifyError):
-    pass
+    @override
+    def error_details(self) -> dict[str, object]:
+        return {"code": "discovery_error"}
 
 
 class NetworkError(SonosifyError):
-    pass
+    @override
+    def error_details(self) -> dict[str, object]:
+        return {"code": "network_error"}
 
 
 class SpeakerNotFoundError(SonosifyError):
@@ -27,6 +37,13 @@ class SpeakerNotFoundError(SonosifyError):
     @property
     def query(self) -> str | None:
         return self._query
+
+    @override
+    def error_details(self) -> dict[str, object]:
+        details: dict[str, object] = {"code": "speaker_not_found"}
+        if self.query is not None:
+            details["query"] = self.query
+        return details
 
 
 class AmbiguousSpeakerError(SonosifyError):
@@ -47,6 +64,14 @@ class AmbiguousSpeakerError(SonosifyError):
     def matches(self) -> tuple[str, ...]:
         return self._matches
 
+    @override
+    def error_details(self) -> dict[str, object]:
+        return {
+            "code": "ambiguous_speaker",
+            "query": self.query,
+            "matches": list(self.matches),
+        }
+
 
 class UPnPError(SonosifyError):
     __slots__ = ("_code", "_description")
@@ -66,3 +91,11 @@ class UPnPError(SonosifyError):
     @property
     def description(self) -> str:
         return self._description
+
+    @override
+    def error_details(self) -> dict[str, object]:
+        return {
+            "code": "upnp_error",
+            "upnp_code": self.code,
+            "description": self.description,
+        }
