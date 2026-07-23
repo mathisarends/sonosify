@@ -1,3 +1,9 @@
+"""List every Sonos speaker found on the local network.
+
+Usage:
+    uv run python examples/discover.py
+"""
+
 import asyncio
 
 from sonosify import discover

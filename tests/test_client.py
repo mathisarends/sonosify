@@ -159,7 +159,7 @@ def test_play_uri_sets_transport_uri_then_plays(recorder: _RecordingSoap) -> Non
     actions = [call[2] for call in recorder.calls]
     assert actions == ["SetAVTransportURI", "Play"]
     set_args = recorder.calls[0][3]
-    assert set_args["CurrentURI"] == "http://stream"
+    assert set_args["CurrentURI"] == "x-rincon-mp3radio://stream"
     assert "Radio" in set_args["CurrentURIMetaData"]
 
 

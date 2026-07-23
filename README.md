@@ -19,6 +19,9 @@ layers you can use independently:
   command-line interface designed to be driven by humans and automation/agents
   alike.
 
+Runnable scripts covering discovery, playback, volume, queue, groups, favorites,
+playback modes, and live events are in [`examples/`](examples/).
+
 ## Installation
 
 Requires **Python 3.13 or 3.14**. Sonos speakers must be reachable on the same
@@ -133,6 +136,17 @@ uv run python examples/discover.py
 uv run python examples/now_playing.py Kitchen
 uv run python examples/watch.py Kitchen
 uv run python examples/play_radio.py Kitchen https://example.com/live.mp3 "Example Radio"
+uv run python examples/resume_playback.py Kitchen
+uv run python examples/volume.py Kitchen 25
+uv run python examples/favorites.py Kitchen
+uv run python examples/favorites.py Kitchen "Jazz FM"
+uv run python examples/track_queue.py Kitchen
+uv run python examples/track_queue.py Kitchen add "x-rincon-mp3radio://example.com/live.mp3"
+uv run python examples/groups.py
+uv run python examples/group.py join Kitchen "Living Room"
+uv run python examples/group.py leave Kitchen
+uv run python examples/playback_modes.py Kitchen shuffle on
+uv run python examples/playback_modes.py Kitchen sleep 0:30:00
 ```
 
 ## Command-line interface

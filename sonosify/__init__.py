@@ -6,7 +6,7 @@ from .client import (
     TransportInfo,
 )
 from .controller import SonosController
-from .didl import parse_favorites, parse_track_metadata, radio_metadata
+from .didl import parse_favorites, parse_track_metadata, radio_metadata, radio_uri
 from .discovery import DEFAULT_DISCOVERY_TIMEOUT, discover
 from .errors import (
     AmbiguousSpeakerError,
@@ -70,5 +70,6 @@ __all__ = [
     "parse_track_id",
     "parse_track_metadata",
     "radio_metadata",
+    "radio_uri",
     "track_metadata",
 ]

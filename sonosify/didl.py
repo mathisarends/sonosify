@@ -58,6 +58,19 @@ def parse_favorites(metadata: str) -> list[Favorite]:
     return favorites
 
 
+def radio_uri(uri: str) -> str:
+    """Rewrite a plain http(s) stream URL to the x-rincon-mp3radio scheme.
+
+    Sonos renderers validate the res protocolInfo declared in the DIDL
+    metadata against the CurrentURI's own scheme; a plain http(s) URI paired
+    with x-rincon-mp3radio metadata is rejected as an illegal MIME type
+    (UPnP error 714).
+    """
+    if uri.startswith(("http://", "https://")):
+        return f"x-rincon-mp3radio://{uri.split('://', 1)[1]}"
+    return uri
+
+
 def radio_metadata(title: str, uri: str) -> str:
     safe_title = escape(title, quote=False)
     safe_uri = escape(uri, quote=False)

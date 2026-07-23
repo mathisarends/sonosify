@@ -7,7 +7,12 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from sonosify._parsing import int_or_none
-from sonosify.didl import parse_favorites, parse_track_metadata, radio_metadata
+from sonosify.didl import (
+    parse_favorites,
+    parse_track_metadata,
+    radio_metadata,
+    radio_uri,
+)
 from sonosify.events import EventService, EventSubscription, TransportState
 from sonosify.events.models import DEFAULT_SERVICES
 from sonosify.models import Favorite, PlaybackState, Speaker, Track
@@ -175,6 +180,8 @@ class SonosClient:
         )
 
     async def play_uri(self, uri: str, *, title: str = "", radio: bool = False) -> None:
+        if radio:
+            uri = radio_uri(uri)
         metadata = radio_metadata(title or uri, uri) if radio else ""
         await self.__av_transport(
             "SetAVTransportURI", CurrentURI=uri, CurrentURIMetaData=metadata

@@ -1,3 +1,9 @@
+"""Stream live playback and volume events from a speaker.
+
+Usage:
+    uv run python examples/watch.py [ROOM]
+"""
+
 import asyncio
 import sys
 

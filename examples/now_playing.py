@@ -1,3 +1,9 @@
+"""Show what is currently playing on a speaker.
+
+Usage:
+    uv run python examples/now_playing.py [ROOM]
+"""
+
 import asyncio
 import sys
 
