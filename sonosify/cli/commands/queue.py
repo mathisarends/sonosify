@@ -4,7 +4,7 @@ from sonosify.cli._dependencies import Table, typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_action, print_records
 from sonosify.cli.parameters import IpOpt, RoomArg
-from sonosify.cli.runtime import run, with_client
+from sonosify.cli.runtime import async_command, client_for
 
 
 def register(app: typer.Typer) -> None:
@@ -12,9 +12,11 @@ def register(app: typer.Typer) -> None:
     app.command()(enqueue)
 
 
-def queue(room: RoomArg = None, ip: IpOpt = None) -> None:
+@async_command
+async def queue(room: RoomArg = None, ip: IpOpt = None) -> None:
     """Show the playback queue of a speaker."""
-    tracks = run(with_client(room, ip, lambda client: client.queue()))
+    async with client_for(room, ip) as client:
+        tracks = await client.queue()
     records: list[dict[str, object]] = [
         {"position": track.position or "", "title": track.title or track.uri}
         for track in tracks
@@ -34,7 +36,8 @@ def queue(room: RoomArg = None, ip: IpOpt = None) -> None:
     print_records(records, ["position", "title"], plain)
 
 
-def enqueue(
+@async_command
+async def enqueue(
     uri: Annotated[str, typer.Argument(help="URI to add to the Sonos queue.")],
     room: Annotated[
         str | None,
@@ -55,13 +58,12 @@ def enqueue(
     ] = False,
 ) -> None:
     """Add a URI to the speaker queue."""
-    position = run(
-        with_client(
-            room,
-            ip,
-            lambda client: client.enqueue_uri(uri, next_=play_next, play=play_now),
+    async with client_for(room, ip) as client:
+        position = await client.enqueue_uri(
+            uri,
+            next_=play_next,
+            play=play_now,
         )
-    )
     status = "playing" if play_now else "enqueued"
     print_action(
         f"[green]{status}[/] {uri}",

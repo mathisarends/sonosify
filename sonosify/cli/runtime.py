@@ -1,5 +1,8 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Callable, Coroutine
+from contextlib import asynccontextmanager
+from functools import wraps
+from typing import Any
 
 from sonosify import SonosClient, SonosController
 from sonosify.cli._dependencies import typer
@@ -9,24 +12,31 @@ from sonosify.cli.state import state
 from sonosify.errors import SonosifyError
 
 
-def run[T](coroutine: Awaitable[T]) -> T:
-    """Run an async operation and turn library errors into clean CLI failures."""
-    try:
-        return asyncio.run(coroutine)
-    except SonosifyError as exc:
-        error_console.print(f"error: {exc}")
-        raise typer.Exit(code=1) from exc
+def async_command[**P, T](
+    function: Callable[P, Coroutine[Any, Any, T]],
+) -> Callable[P, T]:
+    """Adapt an async command handler to Typer's synchronous callback API."""
+
+    @wraps(function)
+    def invoke(*args: P.args, **kwargs: P.kwargs) -> T:
+        try:
+            return asyncio.run(function(*args, **kwargs))
+        except SonosifyError as exc:
+            error_console.print(f"error: {exc}")
+            raise typer.Exit(code=1) from exc
+
+    return invoke
 
 
-async def with_client[T](
+@asynccontextmanager
+async def client_for(
     room: str | None,
     ip: str | None,
-    operation: Callable[[SonosClient], Awaitable[T]],
     *,
     coordinator: bool = True,
-) -> T:
-    """Open a client for an explicit or configured target and run an operation."""
+) -> AsyncIterator[SonosClient]:
+    """Open a client for an explicit or configured target."""
     room, ip = resolve_target(room, ip)
     controller = SonosController(timeout=state.timeout)
     async with await controller.client(room, ip=ip, coordinator=coordinator) as client:
-        return await operation(client)
+        yield client

@@ -3,7 +3,7 @@ from typing import Annotated
 from sonosify.cli._dependencies import typer
 from sonosify.cli.output import print_action
 from sonosify.cli.parameters import IpOpt
-from sonosify.cli.runtime import run, with_client
+from sonosify.cli.runtime import async_command, client_for
 
 
 def register(app: typer.Typer) -> None:
@@ -11,7 +11,8 @@ def register(app: typer.Typer) -> None:
     app.command()(track)
 
 
-def open(
+@async_command
+async def open(
     value: Annotated[str, typer.Argument(help="Stream URL or playable Sonos URI.")],
     room: Annotated[
         str | None,
@@ -28,20 +29,16 @@ def open(
     ] = False,
 ) -> None:
     """Open a supported value and start playback."""
-    position = run(
-        with_client(
-            room,
-            ip,
-            lambda client: client.open(value, title=title, radio=radio),
-        )
-    )
+    async with client_for(room, ip) as client:
+        position = await client.open(value, title=title, radio=radio)
     print_action(
         f"[green]opened[/] {value}",
         {"status": "opened", "value": value, "position": position or ""},
     )
 
 
-def track(
+@async_command
+async def track(
     track_id: Annotated[str, typer.Argument(help="Track id, track URI, or track URL.")],
     room: Annotated[
         str | None,
@@ -59,17 +56,12 @@ def track(
     ] = False,
 ) -> None:
     """Play a track by id on a speaker."""
-    position = run(
-        with_client(
-            room,
-            ip,
-            lambda client: client.open_track(
-                track_id,
-                next_=play_next,
-                play=not enqueue_only,
-            ),
+    async with client_for(room, ip) as client:
+        position = await client.open_track(
+            track_id,
+            next_=play_next,
+            play=not enqueue_only,
         )
-    )
     status = "enqueued" if enqueue_only else "playing"
     print_action(
         f"[green]{status}[/] {track_id}",

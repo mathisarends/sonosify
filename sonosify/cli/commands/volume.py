@@ -5,7 +5,7 @@ from sonosify.cli._dependencies import typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_action, print_object
 from sonosify.cli.parameters import IpOpt, RoomArg
-from sonosify.cli.runtime import run, with_client
+from sonosify.cli.runtime import async_command, client_for
 
 
 def register(app: typer.Typer) -> None:
@@ -15,7 +15,8 @@ def register(app: typer.Typer) -> None:
     app.command()(mute)
 
 
-def volume(
+@async_command
+async def volume(
     target: Annotated[
         str | None,
         typer.Argument(
@@ -41,21 +42,14 @@ def volume(
             pass
 
     if level is None:
-        current = run(
-            with_client(room, ip, lambda client: client.get_volume(), coordinator=False)
-        )
+        async with client_for(room, ip, coordinator=False) as client:
+            current = await client.get_volume()
         print_object(
             {"volume": current}, lambda: console.print(f"volume: [cyan]{current}[/]")
         )
     else:
-        run(
-            with_client(
-                room,
-                ip,
-                lambda client: client.set_volume(level),
-                coordinator=False,
-            )
-        )
+        async with client_for(room, ip, coordinator=False) as client:
+            await client.set_volume(level)
         clamped = max(0, min(100, level))
         print_action(f"volume set to [cyan]{clamped}[/]", {"volume": clamped})
 
@@ -66,7 +60,8 @@ async def adjust_volume(client: SonosClient, delta: int) -> int:
     return new_level
 
 
-def volume_up(
+@async_command
+async def volume_up(
     room: RoomArg = None,
     amount: Annotated[
         int, typer.Argument(help="Percentage points to raise the volume by.")
@@ -74,18 +69,13 @@ def volume_up(
     ip: IpOpt = None,
 ) -> None:
     """Raise a speaker's volume by a number of percentage points."""
-    new_level = run(
-        with_client(
-            room,
-            ip,
-            lambda client: adjust_volume(client, amount),
-            coordinator=False,
-        )
-    )
+    async with client_for(room, ip, coordinator=False) as client:
+        new_level = await adjust_volume(client, amount)
     print_action(f"volume [green]{new_level}[/]", {"volume": new_level})
 
 
-def volume_down(
+@async_command
+async def volume_down(
     room: RoomArg = None,
     amount: Annotated[
         int, typer.Argument(help="Percentage points to lower the volume by.")
@@ -93,18 +83,13 @@ def volume_down(
     ip: IpOpt = None,
 ) -> None:
     """Lower a speaker's volume by a number of percentage points."""
-    new_level = run(
-        with_client(
-            room,
-            ip,
-            lambda client: adjust_volume(client, -amount),
-            coordinator=False,
-        )
-    )
+    async with client_for(room, ip, coordinator=False) as client:
+        new_level = await adjust_volume(client, -amount)
     print_action(f"volume [yellow]{new_level}[/]", {"volume": new_level})
 
 
-def mute(
+@async_command
+async def mute(
     room: RoomArg = None,
     on: Annotated[
         bool | None,
@@ -113,14 +98,12 @@ def mute(
     ip: IpOpt = None,
 ) -> None:
     """Mute, unmute, or toggle mute on a speaker."""
-
-    async def action(client: SonosClient) -> bool:
+    async with client_for(room, ip, coordinator=False) as client:
         if on is None:
-            return await client.toggle_mute()
-        await client.set_mute(on)
-        return on
-
-    muted = run(with_client(room, ip, action, coordinator=False))
+            muted = await client.toggle_mute()
+        else:
+            await client.set_mute(on)
+            muted = on
     print_action(
         "[yellow]muted[/]" if muted else "[green]unmuted[/]",
         {"muted": muted},

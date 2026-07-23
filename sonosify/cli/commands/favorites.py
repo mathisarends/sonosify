@@ -1,20 +1,21 @@
 from typing import Annotated
 
-from sonosify import SonosClient
 from sonosify.cli._dependencies import Table, typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_action, print_records
 from sonosify.cli.parameters import IpOpt, RoomArg
-from sonosify.cli.runtime import run, with_client
+from sonosify.cli.runtime import async_command, client_for
 from sonosify.errors import SonosifyError
 
 app = typer.Typer(help="List and play Sonos favorites.", no_args_is_help=True)
 
 
 @app.command("list")
-def list_favorites(room: RoomArg = None, ip: IpOpt = None) -> None:
+@async_command
+async def list_favorites(room: RoomArg = None, ip: IpOpt = None) -> None:
     """List the Sonos favorites available to a speaker."""
-    favorites = run(with_client(room, ip, lambda client: client.favorites()))
+    async with client_for(room, ip) as client:
+        favorites = await client.favorites()
     records: list[dict[str, object]] = [
         {"index": index, "title": favorite.title}
         for index, favorite in enumerate(favorites, start=1)
@@ -35,7 +36,8 @@ def list_favorites(room: RoomArg = None, ip: IpOpt = None) -> None:
 
 
 @app.command("play")
-def play_favorite(
+@async_command
+async def play_favorite(
     name: Annotated[
         str, typer.Argument(help="Favorite title (or a unique substring).")
     ],
@@ -43,8 +45,7 @@ def play_favorite(
     ip: IpOpt = None,
 ) -> None:
     """Play a favorite by name on a speaker."""
-
-    async def action(client: SonosClient) -> str:
+    async with client_for(room, ip) as client:
         favorites = await client.favorites()
         needle = name.casefold()
         matches = [
@@ -56,9 +57,7 @@ def play_favorite(
             titles = ", ".join(favorite.title for favorite in matches)
             raise SonosifyError(f"ambiguous favorite {name!r}; matches: {titles}")
         await client.open_favorite(matches[0])
-        return matches[0].title
-
-    title = run(with_client(room, ip, action))
+        title = matches[0].title
     print_action(
         f"[green]playing favorite[/] {title}",
         {"status": "playing", "favorite": title},
