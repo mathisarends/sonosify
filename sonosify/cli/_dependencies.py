@@ -1,6 +1,7 @@
 try:
     import typer
     from rich.console import Console
+    from rich.markup import escape
     from rich.table import Table
 except ModuleNotFoundError as exc:  # pragma: no cover - import guard
     raise SystemExit(
@@ -8,4 +9,4 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import guard
         "Install them with: pip install 'sonosify[cli]'"
     ) from exc
 
-__all__ = ["Console", "Table", "typer"]
+__all__ = ["Console", "Table", "escape", "typer"]

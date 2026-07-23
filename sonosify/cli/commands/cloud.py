@@ -5,7 +5,7 @@ import time
 from typing import Annotated
 from urllib.parse import parse_qs, urlparse
 
-from sonosify.cli._dependencies import Table, typer
+from sonosify.cli._dependencies import Table, escape, typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_action, print_object, print_records
 from sonosify.cli.runtime import async_command
@@ -91,10 +91,18 @@ async def _authorize(auth: SonosCloudAuth, code: str) -> None:
 async def _onboard(auth: SonosCloudAuth) -> None:
     url = auth.get_authorization_url()
     console.print("[bold]Let's connect your Sonos account.[/]")
-    console.print(f"1. Open this URL in your browser and log in:\n   {url}")
+    console.print("1. Open this URL in your browser and log in:")
+    console.print(f"   [link={url}]{escape(url)}[/link]")
     console.print("2. Approve access — you'll land on your redirect page.")
     value = typer.prompt("3. Paste that page's URL (or just its 'code' value)")
     await _authorize(auth, _extract_code(value))
+
+
+_SESSION_MENU = (
+    ("k", "keep", "leave the session as is"),
+    ("r", "refresh", "get a new access token"),
+    ("x", "remove", "delete the cached token"),
+)
 
 
 async def _manage_existing_session(auth: SonosCloudAuth, token: OAuthToken) -> None:
@@ -102,25 +110,26 @@ async def _manage_existing_session(auth: SonosCloudAuth, token: OAuthToken) -> N
         f"[green]Already authorized[/] → {auth.token_cache_path} "
         f"({_describe_expiry(token)})"
     )
-    choice = (
-        typer.prompt("Keep, refresh, or remove this session?", default="keep")
-        .strip()
-        .lower()
-    )
-    while choice not in {"keep", "refresh", "remove"}:
+    console.print("What would you like to do?")
+    for letter, label, description in _SESSION_MENU:
+        console.print(f"  [bold]{letter}[/] {label:<8} {description}")
+
+    valid = {letter for letter, _, _ in _SESSION_MENU}
+    choice = typer.prompt("Choice", default="k").strip().lower()
+    while choice not in valid:
         choice = (
-            typer.prompt("Please answer 'keep', 'refresh', or 'remove'", default="keep")
+            typer.prompt(f"Please enter one of {sorted(valid)}", default="k")
             .strip()
             .lower()
         )
 
     match choice:
-        case "refresh":
+        case "r":
             refreshed = await auth.async_refresh_token(token.refresh_token or None)
             console.print(
                 f"[green]refreshed[/] Sonos cloud token ({_describe_expiry(refreshed)})"
             )
-        case "remove":
+        case "x":
             auth.clear_token()
             console.print("[green]removed[/] cached Sonos cloud token")
         case _:

@@ -143,7 +143,7 @@ def test_login_offers_refresh_for_an_existing_session(
     )
     monkeypatch.setattr(cloud_command, "SonosCloudAuth", _FakeAuth)
 
-    result = CliRunner().invoke(app, ["cloud", "login"], input="refresh\n")
+    result = CliRunner().invoke(app, ["cloud", "login"], input="r\n")
 
     assert result.exit_code == 0, result.output
     assert "Already authorized" in result.output
@@ -156,7 +156,7 @@ def test_login_offers_removal_for_an_existing_session(
     _FakeAuth.cached_token = OAuthToken(access_token="old-access", expires_in=3600)
     monkeypatch.setattr(cloud_command, "SonosCloudAuth", _FakeAuth)
 
-    result = CliRunner().invoke(app, ["cloud", "login"], input="remove\n")
+    result = CliRunner().invoke(app, ["cloud", "login"], input="x\n")
 
     assert result.exit_code == 0, result.output
     assert "removed" in result.output
