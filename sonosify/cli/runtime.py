@@ -1,6 +1,6 @@
 import asyncio
 import json
-from collections.abc import AsyncIterator, Callable, Coroutine
+from collections.abc import AsyncGenerator, Callable, Coroutine
 from contextlib import asynccontextmanager
 from functools import wraps
 from typing import Any
@@ -30,6 +30,12 @@ EXIT_CODES = {
 
 def error_details(exc: SonosifyError) -> dict[str, object]:
     data: dict[str, object] = {"schema_version": 1, "error": str(exc)}
+    custom_details = getattr(exc, "error_details", None)
+    if callable(custom_details):
+        details = custom_details()
+        if isinstance(details, dict):
+            data.update(details)
+            return data
     match exc:
         case AmbiguousSpeakerError():
             data.update(
@@ -87,7 +93,7 @@ async def client_for(
     ip: str | None,
     *,
     coordinator: bool = True,
-) -> AsyncIterator[SonosClient]:
+) -> AsyncGenerator[SonosClient]:
     """Open a client for an explicit or configured target."""
     room, ip = resolve_target(room, ip)
     if room and not ip:

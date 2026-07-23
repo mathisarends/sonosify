@@ -2,6 +2,7 @@
 
 from . import (
     agent,
+    cloud,
     config,
     discovery,
     favorites,
@@ -15,6 +16,7 @@ from . import (
 
 __all__ = [
     "agent",
+    "cloud",
     "config",
     "discovery",
     "favorites",

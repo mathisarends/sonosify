@@ -5,6 +5,7 @@ from typing import Annotated
 from sonosify.cli._dependencies import typer
 from sonosify.cli.commands import (
     agent,
+    cloud,
     config,
     discovery,
     favorites,
@@ -67,6 +68,7 @@ agent.register(app)
 app.add_typer(favorites.app, name="favorites")
 media.register(app)
 app.add_typer(config.app, name="config")
+app.add_typer(cloud.app, name="cloud")
 
 
 @app.callback()
