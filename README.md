@@ -89,32 +89,34 @@ uv pip install -e ".[cli]"
 This exposes a `sonosify` command:
 
 ```powershell
-sonosify discover                       # list speakers on the network
-sonosify now-playing Kitchen            # show the current track
-sonosify play Kitchen                   # resume playback
-sonosify pause Kitchen                  # pause playback
-sonosify stop Kitchen                   # stop playback
-sonosify next Kitchen                   # skip to the next track
-sonosify previous Kitchen               # skip to the previous track
-sonosify volume Kitchen 25              # set volume (omit the number to read it)
-sonosify volume 25                      # set volume on the configured default speaker
-sonosify volume-up Kitchen 10           # raise volume by N percentage points (default 5)
-sonosify volume-down Kitchen 10         # lower volume by N percentage points (default 5)
-sonosify mute Kitchen --on              # --on / --off, or omit to toggle
-sonosify queue Kitchen                  # show the queue
-sonosify favorites list Kitchen         # list favorites
-sonosify favorites play Kitchen "Jazz"  # play a favorite by name
-sonosify enqueue x-file-cifs://... --room Kitchen
-sonosify open https://example.com/live.mp3 --room Kitchen --radio --title "Example Radio"
-sonosify track 6NmXV4o6bmp704aPGyTVVG --room Kitchen
-sonosify track 6NmXV4o6bmp704aPGyTVVG --room Kitchen --enqueue
-sonosify watch Kitchen                  # stream live events (Ctrl+C to stop)
+sonosify discover --format json
+sonosify status --room Kitchen --format json
+sonosify play --room Kitchen
+sonosify pause --all
+sonosify set-volume 25 --room Kitchen
+sonosify set-volume 20 --group "Living Room"
+sonosify mute --room Kitchen --on
+sonosify queue --room Kitchen
+sonosify queue jump 7 --room Kitchen
+sonosify seek 1:30 --room Kitchen
+sonosify shuffle on --room Kitchen
+sonosify repeat all --room Kitchen
+sonosify crossfade on --room Kitchen
+sonosify sleep 30m --room Kitchen
+sonosify group "Living Room" --with Kitchen --with Office
+sonosify ungroup --room Kitchen
+sonosify groups --format json
+sonosify ping --room Kitchen --format json
+sonosify watch --room Kitchen --count 5 --format json
 ```
 
 ### Targeting a speaker
 
-Every command accepts an optional room name as its first argument, or `--ip <address>`
-to skip name matching entirely.
+Every speaker command accepts `--room/-r` and `--ip`. Existing positional room
+arguments remain available for compatibility. `--ip` opens the device directly and
+does not perform SSDP discovery. A successful `discover` refreshes the persistent
+room-to-IP cache; exact room names use that cache and fall back to discovery on a
+cache miss.
 
 ### Default speaker
 
@@ -133,21 +135,82 @@ sonosify volume-up
 An explicit room name or `--ip` on a command always overrides the configured default.
 The config is stored as JSON in your platform's app-config directory.
 
-### Output format
-
-Use `--format` (before the command) for machine-readable output in scripts:
+The same defaults can be supplied without writing a file:
 
 ```powershell
-sonosify --format json discover         # JSON array of speakers
-sonosify --format tsv queue Kitchen     # tab-separated rows
-sonosify --format json now-playing      # JSON object
+$env:SONOSIFY_ROOM = "Kitchen"
+$env:SONOSIFY_IP = "192.168.1.42"
+$env:SONOSIFY_FORMAT = "json"
+$env:SONOSIFY_TIMEOUT = "5"
+$env:SONOSIFY_DEBUG = "1"
+```
+
+Precedence is command-line flag, then environment, then config file.
+
+### Output format
+
+Use `--format` before or after a command:
+
+```powershell
+sonosify --format json discover         # JSON speaker-list envelope
+sonosify --format tsv queue --room Kitchen  # tab-separated rows
+sonosify status --format json            # JSON object
 ```
 
 `plain` (the default) renders rich tables and colored text for interactive use.
+Machine-readable stdout contains only result data. Diagnostics and debug traces go
+to stderr.
+
+JSON output has `schema_version: 1`. Object/action commands add their fields beside
+it. List commands use this stable envelope:
+
+```json
+{"schema_version": 1, "items": [{"room": "Kitchen", "ip": "192.168.1.42"}]}
+```
+
+`now-playing` and `status` include numeric `position_s` and `duration_s`.
+`status` combines playback state, volume, mute state, track, group identifier, and
+timing in one call.
+
+`watch --format json` emits one object per line (NDJSON). It can terminate itself
+with `--count N`, `--duration 10s`, or `--until PLAYING`.
+
+### Errors and exit codes
+
+In JSON mode, failures are emitted as a JSON object on stderr while stdout remains
+empty:
+
+```json
+{"schema_version": 1, "error": "no speaker matching 'Kitcen'", "code": "speaker_not_found", "query": "Kitcen"}
+```
+
+Stable exit codes are:
+
+| Exit | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Other sonosify error |
+| `2` | Speaker not found |
+| `3` | Ambiguous speaker (`matches` is included in JSON) |
+| `4` | Discovery or network failure / timeout |
+| `5` | Sonos UPnP error (`upnp_code` and `description` are included) |
+
+### Queue, groups, and playback modes
+
+Queue management is available through `queue clear`, `queue remove POSITION`, and
+`queue jump POSITION`. `group`, `ungroup`, and `groups` expose multi-room grouping.
+Playback automation includes in-track `seek`, `shuffle`, `repeat`, `crossfade`, and
+the `sleep` timer.
+
+The legacy overloaded `volume` command remains available. Agents should prefer the
+unambiguous `get-volume` and `set-volume` commands.
+
+Use `sonosify commands --format json` for recursive command/parameter
+introspection and `sonosify --version --format json` for feature detection.
 
 ### Debugging
 
-Add `--debug` (before the command) to print the underlying SOAP request/response
+Add `--debug` to print the underlying SOAP request/response
 traces to stderr:
 
 ```powershell
@@ -157,4 +220,7 @@ sonosify --debug volume Kitchen
 `sonosify track ...` expects a track id, track URI, or track URL. Playback works when
 the corresponding music service is already linked on your Sonos household.
 
-Exports are collected in `sonosify.__init__` for library consumers.
+Exports are collected in `sonosify.__init__` for library consumers. The agent CLI
+work also adds `RepeatMode`, `NetworkError`, `SonosClient.seek`,
+`get_play_mode`/`set_play_mode`, `set_shuffle`, `set_repeat`,
+`get_crossfade`/`set_crossfade`, and `configure_sleep_timer` to the Python API.

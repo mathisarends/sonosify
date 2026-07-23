@@ -260,3 +260,35 @@ ein `schema_version`-Feld), macht die CLI langfristig agent-tauglich.
 | P1 | Gruppen- & Queue-Kommandos (6, 7, 8) | Library kann es schon – nur freischalten |
 | P2 | Shuffle/Repeat/Sleep/`--all` (9–11) | „Coole“ Automationen mit hohem Demo-Wert |
 | P3 | Einheitliches Targeting & Env-Vars (13–16) | Weniger generierte Fehlaufrufe |
+
+---
+
+## Implementierungsupdate (23. Juli 2026)
+
+Die Wunschliste wurde vollständig umgesetzt. Der aktuelle Stand umfasst:
+
+- strukturierte JSON-Fehler auf stderr mit `schema_version`, stabilen Fehlercodes,
+  Ambiguitäts-Matches und differenzierten Exit-Codes `1` bis `5`;
+- direkten Zugriff ohne SSDP bei `--ip`, einen durch `discover` gepflegten
+  Room→IP/UID-Cache und `discover --refresh`;
+- selbstterminierendes `watch` mit `--count`, `--duration`, `--until` und NDJSON;
+- `status` mit Playback, Lautstärke, Mute, Track, Gruppe sowie numerischen
+  `position_s`/`duration_s`;
+- `group`, `ungroup`, `groups`, `queue clear/remove/jump` und In-Track-`seek`;
+- die neuen Library- und CLI-Fähigkeiten Shuffle, Repeat, Crossfade und Sleep-Timer;
+- Batch-Operationen über `pause --all` und `set-volume --group`;
+- `ping` und `doctor` mit Erreichbarkeit und Latenz;
+- einheitliches `--room`/`--ip`-Targeting bei allen Speaker-Kommandos sowie die
+  expliziten Kommandos `get-volume`/`set-volume`;
+- globale Optionen vor oder nach dem Subcommand und Konfiguration über
+  `SONOSIFY_ROOM`, `SONOSIFY_IP`, `SONOSIFY_FORMAT`, `SONOSIFY_TIMEOUT` und
+  `SONOSIFY_DEBUG`;
+- strikte stdout/stderr-Trennung, typstabile JSON-Werte und den dokumentierten
+  JSON-Vertrag mit `schema_version: 1`;
+- rekursive Maschinen-Introspektion über `commands --format json` sowie
+  `--version` einschließlich JSON-Ausgabe.
+
+Die README dokumentiert die geänderten CLI-Aufrufe, JSON-Envelopes, Fehler- und
+Exit-Code-Verträge, Umgebungsvariablen und die hinzugekommenen Python-APIs. Die
+Tests wurden auf die neuen Verträge erweitert; beim Abschlusslauf bestanden
+183 Tests, Ruff-Lint und Ruff-Formatprüfung.
