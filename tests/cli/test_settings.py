@@ -76,3 +76,25 @@ def test_resolve_target_ignores_non_string_config_values(
     settings.save_config({"default_room": 123})
 
     assert settings.resolve_target(None, None) == (None, None)
+
+
+def test_resolve_target_prefers_environment_over_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "CONFIG_PATH", tmp_path / "config.json")
+    settings.save_config({"default_room": "Kitchen"})
+    monkeypatch.setenv("SONOSIFY_ROOM", "Office")
+
+    assert settings.resolve_target(None, None) == ("Office", None)
+
+
+def test_speaker_cache_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "CONFIG_PATH", tmp_path / "config.json")
+
+    settings.save_speaker_cache(
+        [{"room": "Kitchen", "ip": "192.168.1.10", "uid": "RINCON_1"}]
+    )
+
+    assert settings.cached_ip("kitchen") == "192.168.1.10"

@@ -44,7 +44,7 @@ class SonosSystem:
             for speaker in candidates:
                 if speaker.ip == ip:
                     return speaker
-            raise SpeakerNotFoundError(f"no speaker with IP {ip}")
+            raise SpeakerNotFoundError(f"no speaker with IP {ip}", query=ip)
 
         if not query:
             visible = [speaker for speaker in candidates if speaker.room_name]
@@ -72,7 +72,7 @@ class SonosSystem:
             return fuzzy[0]
         if len(fuzzy) > 1:
             raise AmbiguousSpeakerError(query, [speaker.room_name for speaker in fuzzy])
-        raise SpeakerNotFoundError(f"no speaker matching {query!r}")
+        raise SpeakerNotFoundError(f"no speaker matching {query!r}", query=query)
 
     def coordinator_for(self, speaker: Speaker) -> Speaker:
         uid = speaker.coordinator_uid or speaker.uid

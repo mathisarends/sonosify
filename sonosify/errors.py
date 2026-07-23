@@ -14,7 +14,15 @@ class DiscoveryError(SonosifyError):
 
 
 class SpeakerNotFoundError(SonosifyError):
-    pass
+    __slots__ = ("_query",)
+
+    def __init__(self, message: str, *, query: str | None = None) -> None:
+        self._query = query
+        super().__init__(message)
+
+    @property
+    def query(self) -> str | None:
+        return self._query
 
 
 class AmbiguousSpeakerError(SonosifyError):

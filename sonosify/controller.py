@@ -54,6 +54,8 @@ class SonosController:
         ip: str | None = None,
         coordinator: bool = True,
     ) -> SonosClient:
+        if ip is not None:
+            return SonosClient(ip, timeout=self._timeout)
         system = self._system or await self.discover()
         return system.client(
             room,

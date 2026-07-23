@@ -11,7 +11,7 @@ from sonosify.cli.console import console
 from sonosify.cli.output import print_object, print_records
 from sonosify.cli.parameters import IpOpt, RoomArg
 from sonosify.cli.runtime import async_command, client_for
-from sonosify.cli.settings import resolve_target
+from sonosify.cli.settings import resolve_target, save_speaker_cache
 from sonosify.cli.state import state
 
 
@@ -22,7 +22,11 @@ def register(app: typer.Typer) -> None:
 
 
 @async_command
-async def discover() -> None:
+async def discover(
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Force discovery and refresh the speaker cache."
+    ),
+) -> None:
     """List every Sonos speaker discovered on the local network."""
     system: SonosSystem = await SonosController(timeout=state.timeout).discover()
     speakers = sorted(system.speakers, key=lambda speaker: speaker.room_name.casefold())
@@ -35,6 +39,7 @@ async def discover() -> None:
         }
         for speaker in speakers
     ]
+    save_speaker_cache(records)
 
     def plain() -> None:
         if not records:

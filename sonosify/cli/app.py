@@ -11,7 +11,7 @@ from sonosify.cli.commands import (
     queue,
     volume,
 )
-from sonosify.cli.settings import load_config
+from sonosify.cli.settings import env_value, load_config
 from sonosify.cli.state import OutputFormat, state
 from sonosify.client import DEFAULT_TIMEOUT
 
@@ -50,11 +50,17 @@ def main(
     config_values = load_config()
     state.configure(
         format=output_format
-        or OutputFormat(config_values.get("default_format", OutputFormat.PLAIN)),
+        or OutputFormat(
+            env_value("FORMAT")
+            or config_values.get("default_format", OutputFormat.PLAIN)
+        ),
         timeout=timeout
         if timeout is not None
-        else float(config_values.get("default_timeout", DEFAULT_TIMEOUT)),
-        debug=debug,
+        else float(
+            env_value("TIMEOUT")
+            or config_values.get("default_timeout", DEFAULT_TIMEOUT)
+        ),
+        debug=debug or env_value("DEBUG") in {"1", "true", "yes"},
     )
     if debug:
         handler = logging.StreamHandler()

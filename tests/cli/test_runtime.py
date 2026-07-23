@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import json
 
 import pytest
 
@@ -9,7 +10,13 @@ pytest.importorskip("rich")
 import sonosify.cli.runtime as runtime_module
 from sonosify.cli._dependencies import typer
 from sonosify.cli.runtime import async_command, client_for
-from sonosify.errors import SonosifyError
+from sonosify.cli.state import OutputFormat, state
+from sonosify.errors import (
+    AmbiguousSpeakerError,
+    SonosifyError,
+    SpeakerNotFoundError,
+    UPnPError,
+)
 
 
 def test_async_command_awaits_handler_and_preserves_signature() -> None:
@@ -34,6 +41,39 @@ def test_async_command_reports_sonosify_error_and_exits(
 
     assert excinfo.value.exit_code == 1
     assert "boom" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("error", "exit_code", "code"),
+    [
+        (SpeakerNotFoundError("missing", query="Kitchen"), 2, "speaker_not_found"),
+        (
+            AmbiguousSpeakerError("Kit", ["Kitchen", "Kitchen 2"]),
+            3,
+            "ambiguous_speaker",
+        ),
+        (UPnPError("701", "Transition unavailable"), 5, "upnp_error"),
+    ],
+)
+def test_async_command_reports_structured_json_errors(
+    error: SonosifyError,
+    exit_code: int,
+    code: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    state.configure(format=OutputFormat.JSON, debug=False, timeout=1)
+
+    @async_command
+    async def handler() -> None:
+        raise error
+
+    with pytest.raises(typer.Exit) as excinfo:
+        handler()
+
+    output = capsys.readouterr()
+    assert excinfo.value.exit_code == exit_code
+    assert json.loads(output.err)["code"] == code
+    assert output.out == ""
 
 
 def test_client_for_resolves_target_and_yields_controller_client(

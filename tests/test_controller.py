@@ -163,6 +163,19 @@ def test_controller_client_triggers_discovery_when_uncached(
     assert controller.system is system
 
 
+def test_controller_client_with_ip_bypasses_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_discover(*args: object, **kwargs: object) -> SonosSystem:
+        raise AssertionError("direct IP access must not perform discovery")
+
+    monkeypatch.setattr(controller_module, "discover", fail_discover)
+
+    client = asyncio.run(SonosController(timeout=3).client(ip="192.168.1.10"))
+
+    assert client.ip == "192.168.1.10"
+
+
 class _RecordingClient:
     def __init__(self) -> None:
         self.calls: list[str] = []
