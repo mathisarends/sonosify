@@ -133,6 +133,29 @@ def test_audio_clip_requires_app_id_and_valid_url() -> None:
     asyncio.run(run())
 
 
+def test_cancel_audio_clip_deletes_clip_from_player() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.raw_path
+        seen["content"] = request.content
+        return httpx.Response(200)
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = SonosCloudClient(_auth(), http_client=http)
+            await client.cancel_audio_clip("RINCON_123:1", "clip/1")
+
+    asyncio.run(run())
+
+    assert seen == {
+        "method": "DELETE",
+        "path": b"/control/api/v1/players/RINCON_123:1/audioClip/clip%2F1",
+        "content": b"",
+    }
+
+
 def test_control_api_error_preserves_status_and_sonos_code() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(499, json={"errorCode": "ERROR_NO_CONTENT"})

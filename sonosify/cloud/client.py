@@ -177,6 +177,12 @@ class SonosCloudClient:
         )
         return AudioClip.model_validate(result)
 
+    async def cancel_audio_clip(self, player_id: str, clip_id: str) -> None:
+        await self._request(
+            "DELETE",
+            f"/players/{_segment(player_id)}/audioClip/{_segment(clip_id)}",
+        )
+
     async def play(self, group_id: str) -> None:
         await self._group_command(group_id, "play")
 
