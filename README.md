@@ -104,8 +104,9 @@ the [Sonos Developer Platform](https://developer.sonos.com/):
 
 1. Sign in at the [Sonos integration manager](https://integration.sonos.com/)
    and create a new integration.
-2. Register a publicly routable **HTTPS** redirect URI. Sonos requires it to
-   exactly match the URI your app uses to complete the OAuth flow.
+2. Register a redirect URI, e.g. `http://localhost:8000/callback` for local
+   use. Sonos requires it to exactly match the URI your app uses to complete
+   the OAuth flow.
 3. Copy the generated **Client ID** and **Client Secret**.
 
 Compared to the local UPnP-based core library, the Cloud API:
