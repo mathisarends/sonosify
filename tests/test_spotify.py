@@ -1,6 +1,6 @@
 import pytest
 
-from sonosify import parse_track_id, track_metadata
+from sonosify.spotify import parse_track_id, track_metadata
 
 
 def test_parse_track_id_from_bare_id() -> None:

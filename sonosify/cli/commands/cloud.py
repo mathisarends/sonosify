@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import secrets
+import time
 from typing import Annotated
+from urllib.parse import parse_qs, urlparse
 
 from sonosify.cli._dependencies import Table, typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_action, print_object, print_records
 from sonosify.cli.runtime import async_command
+from sonosify.cli.state import OutputFormat, state
 from sonosify.cloud.auth import SonosCloudAuth
 from sonosify.cloud.client import SonosCloudClient
 from sonosify.cloud.errors import CloudConfigurationError
-from sonosify.cloud.models import ClipPriority, ClipType
+from sonosify.cloud.models import ClipPriority, ClipType, OAuthToken
 from sonosify.cloud.settings import _CloudSettings
 
 _HOUSEHOLD_ID_ENV = "SONOSIFY_CLOUD_HOUSEHOLD_ID"
@@ -23,6 +26,18 @@ app = typer.Typer(
 
 def _household_id(value: str | None) -> str | None:
     return value or _CloudSettings().household_id
+
+
+def _extract_code(value: str) -> str:
+    """Accept a bare authorization code or the full redirect URL and return the code."""
+    if "://" not in value:
+        return value
+    code = parse_qs(urlparse(value).query).get("code")
+    if not code:
+        raise typer.BadParameter(
+            "redirect URL has no 'code' query parameter", param_hint="code"
+        )
+    return code[0]
 
 
 async def _group_id(
@@ -52,16 +67,16 @@ async def auth_url(
     )
 
 
-@app.command()
-@async_command
-async def login(
-    code: Annotated[
-        str,
-        typer.Argument(help="Authorization code received at the redirect URI."),
-    ],
-) -> None:
-    """Exchange an authorization code and save the OAuth token locally."""
-    auth = SonosCloudAuth.from_environment()
+def _describe_expiry(token: OAuthToken) -> str:
+    if token.expires_in <= 0:
+        return "no expiry recorded"
+    remaining = token.obtained_at + token.expires_in - time.time()
+    if remaining <= 0:
+        return "expired"
+    return f"expires in {int(remaining // 60)}m"
+
+
+async def _authorize(auth: SonosCloudAuth, code: str) -> None:
     token = await auth.async_exchange_code(code)
     print_action(
         f"[green]authorized[/] Sonos cloud → {auth.token_cache_path}",
@@ -71,6 +86,79 @@ async def login(
             "expires_in": token.expires_in,
         },
     )
+
+
+async def _onboard(auth: SonosCloudAuth) -> None:
+    url = auth.get_authorization_url()
+    console.print("[bold]Let's connect your Sonos account.[/]")
+    console.print(f"1. Open this URL in your browser and log in:\n   {url}")
+    console.print("2. Approve access — you'll land on your redirect page.")
+    value = typer.prompt("3. Paste that page's URL (or just its 'code' value)")
+    await _authorize(auth, _extract_code(value))
+
+
+async def _manage_existing_session(auth: SonosCloudAuth, token: OAuthToken) -> None:
+    console.print(
+        f"[green]Already authorized[/] → {auth.token_cache_path} "
+        f"({_describe_expiry(token)})"
+    )
+    choice = (
+        typer.prompt("Keep, refresh, or remove this session?", default="keep")
+        .strip()
+        .lower()
+    )
+    while choice not in {"keep", "refresh", "remove"}:
+        choice = (
+            typer.prompt("Please answer 'keep', 'refresh', or 'remove'", default="keep")
+            .strip()
+            .lower()
+        )
+
+    match choice:
+        case "refresh":
+            refreshed = await auth.async_refresh_token(token.refresh_token or None)
+            console.print(
+                f"[green]refreshed[/] Sonos cloud token ({_describe_expiry(refreshed)})"
+            )
+        case "remove":
+            auth.clear_token()
+            console.print("[green]removed[/] cached Sonos cloud token")
+        case _:
+            console.print("[dim]keeping existing session[/]")
+
+
+@app.command()
+@async_command
+async def login(
+    code: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Authorization code or full redirect URL, to skip straight to "
+                "exchanging it. Omit to run the interactive onboarding wizard, "
+                "or to manage an already-cached session."
+            )
+        ),
+    ] = None,
+) -> None:
+    """Authorize sonosify with a Sonos account, or manage the cached token."""
+    auth = SonosCloudAuth.from_environment()
+
+    if code is not None:
+        await _authorize(auth, _extract_code(code))
+        return
+
+    if state.format is not OutputFormat.PLAIN:
+        raise typer.BadParameter(
+            "pass the authorization code or redirect URL explicitly "
+            "(the interactive wizard needs --format plain)"
+        )
+
+    token = auth.load_token()
+    if token is None:
+        await _onboard(auth)
+    else:
+        await _manage_existing_session(auth, token)
 
 
 @app.command()

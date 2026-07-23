@@ -136,8 +136,7 @@ The reusable API also accepts credentials explicitly:
 ```python
 import asyncio
 
-from sonosify.cloud.auth import SonosCloudAuth
-from sonosify.cloud.client import SonosCloudClient
+from sonosify import SonosCloudAuth, SonosCloudClient
 
 
 async def main():
@@ -175,7 +174,7 @@ systems; `MemoryCacheHandler` is useful for services that manage persistence
 elsewhere or deliberately keep credentials process-local:
 
 ```python
-from sonosify.cloud.auth import SonosCloudAuth
+from sonosify import SonosCloudAuth
 from sonosify.cloud.cache_handler import MemoryCacheHandler
 
 auth = SonosCloudAuth(
@@ -186,19 +185,24 @@ auth = SonosCloudAuth(
 )
 ```
 
-Public classes live in the named `sonosify.cloud` modules (`auth`, `client`,
-`cache_handler`, `errors`, and `models`). Names prefixed with `_`, including
-endpoint URLs, OAuth scope values, settings implementation, and cache-path
-selection, are private.
+The main clients, their common models and enums, and the shared
+`SonosCloudError` can be imported directly from `sonosify` or `sonosify.cloud`.
+Specialized cache handlers and errors remain available from their named
+`sonosify.cloud` modules. Names prefixed with `_`, including endpoint URLs,
+OAuth scope values, settings implementation, and cache-path selection, are
+private.
 
 ### Cloud CLI configuration
 
 The `cloud` command group is always present when the CLI is installed:
 
 ```powershell
-sonosify cloud auth-url
-# Complete authorization, then pass the code received at the redirect URI:
-sonosify cloud login AUTHORIZATION_CODE
+# Interactive onboarding wizard: prints the URL to open, prompts for the
+# redirect URL (or bare code) once you're back, and saves the token. Run
+# again later and it recognizes an existing session, offering to keep,
+# refresh, or remove it.
+sonosify cloud login
+sonosify cloud logout
 
 sonosify cloud households
 sonosify cloud groups
