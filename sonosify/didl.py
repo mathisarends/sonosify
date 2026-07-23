@@ -3,10 +3,10 @@ from xml.etree import ElementTree
 
 from sonosify.models import Favorite, Track
 
-DIDL_NS = "urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"
-DC_NS = "http://purl.org/dc/elements/1.1/"
-UPNP_NS = "urn:schemas-upnp-org:metadata-1-0/upnp/"
-RINCON_NS = "urn:schemas-rinconnetworks-com:metadata-1-0/"
+_DIDL_NS = "urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"
+_DC_NS = "http://purl.org/dc/elements/1.1/"
+_UPNP_NS = "urn:schemas-upnp-org:metadata-1-0/upnp/"
+_RINCON_NS = "urn:schemas-rinconnetworks-com:metadata-1-0/"
 
 
 def parse_track_metadata(
@@ -62,8 +62,8 @@ def radio_metadata(title: str, uri: str) -> str:
     safe_title = escape(title, quote=False)
     safe_uri = escape(uri, quote=False)
     return (
-        f'<DIDL-Lite xmlns:dc="{DC_NS}" xmlns:upnp="{UPNP_NS}" '
-        f'xmlns:r="{RINCON_NS}" xmlns="{DIDL_NS}">'
+        f'<DIDL-Lite xmlns:dc="{_DC_NS}" xmlns:upnp="{_UPNP_NS}" '
+        f'xmlns:r="{_RINCON_NS}" xmlns="{_DIDL_NS}">'
         '<item id="R:0/0/0" parentID="R:0/0" restricted="true">'
         f"<dc:title>{safe_title}</dc:title>"
         "<upnp:class>object.item.audioItem.audioBroadcast</upnp:class>"

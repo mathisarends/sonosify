@@ -1,10 +1,17 @@
-from .client import DEFAULT_TIMEOUT, PositionInfo, SonosClient, TransportInfo
+from .client import (
+    DEFAULT_TIMEOUT,
+    PositionInfo,
+    RepeatMode,
+    SonosClient,
+    TransportInfo,
+)
 from .controller import SonosController
 from .didl import parse_favorites, parse_track_metadata, radio_metadata
 from .discovery import DEFAULT_DISCOVERY_TIMEOUT, discover
 from .errors import (
     AmbiguousSpeakerError,
     DiscoveryError,
+    NetworkError,
     SonosifyError,
     SpeakerNotFoundError,
     UnsupportedFeatureError,
@@ -20,7 +27,6 @@ from .events import (
     SonosEvent,
     TransportState,
     UnknownSonosEvent,
-    parse_last_change,
     parse_notify_event,
 )
 from .models import Favorite, Group, PlaybackState, Speaker, Track
@@ -37,6 +43,7 @@ __all__ = [
     "EventService",
     "EventSubscription",
     "KnownSonosEvent",
+    "NetworkError",
     "Favorite",
     "Group",
     "PlaybackState",
@@ -47,6 +54,7 @@ __all__ = [
     "SonosSystem",
     "SonosifyError",
     "RenderingControlEvent",
+    "RepeatMode",
     "Speaker",
     "SpeakerNotFoundError",
     "TrackReference",
@@ -57,7 +65,6 @@ __all__ = [
     "UPnPError",
     "UnsupportedFeatureError",
     "discover",
-    "parse_last_change",
     "parse_notify_event",
     "parse_favorites",
     "parse_track_id",

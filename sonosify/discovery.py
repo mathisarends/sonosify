@@ -1,6 +1,7 @@
 import asyncio
 import socket
 from collections.abc import Iterable
+from enum import StrEnum
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
@@ -13,6 +14,30 @@ from sonosify.models import Group, Speaker
 from sonosify.topology import SonosSystem
 
 DEFAULT_DISCOVERY_TIMEOUT = 2.0
+
+_UUID_PREFIX = "uuid:"
+
+
+class DeviceTag(StrEnum):
+    DEVICE = "device"
+    ROOM_NAME = "roomName"
+    FRIENDLY_NAME = "friendlyName"
+    UDN = "UDN"
+
+
+class ZoneTag(StrEnum):
+    GROUP = "ZoneGroup"
+    MEMBER = "ZoneGroupMember"
+
+
+class ZoneAttr(StrEnum):
+    ID = "ID"
+    COORDINATOR = "Coordinator"
+    UUID = "UUID"
+    LOCATION = "Location"
+    ZONE_NAME = "ZoneName"
+    INVISIBLE = "Invisible"
+
 
 _SSDP_ADDRESS = ("239.255.255.250", 1900)
 _SONOS_ST = "urn:schemas-upnp-org:device:ZonePlayer:1"
@@ -35,13 +60,15 @@ async def discover(
     discovery_timeout: float = DEFAULT_DISCOVERY_TIMEOUT,
     include_invisible: bool = False,
 ) -> SonosSystem:
-    locations = await asyncio.to_thread(_ssdp_locations, discovery_timeout)
+    locations = await _ssdp_locations(discovery_timeout)
     if not locations:
         raise DiscoveryError("no Sonos speakers discovered via SSDP")
 
     speakers = await _speakers_from_locations(locations, timeout)
     if not speakers:
-        raise DiscoveryError("Sonos speakers responded but no device metadata could be parsed")
+        raise DiscoveryError(
+            "Sonos speakers responded but no device metadata could be parsed"
+        )
 
     topology = await _topology_from_speakers(speakers, timeout)
     if topology:
@@ -61,20 +88,26 @@ async def discover(
             if any(not s.invisible for s in group.members)
         )
 
-    return SonosSystem(speakers=speakers, groups=groups, timeout=timeout)
+    return SonosSystem(speakers, groups, timeout)
 
 
-def _ssdp_locations(timeout: float) -> set[str]:
-    # Blocking UDP multicast, run in a thread via asyncio.to_thread. asyncio's
-    # create_datagram_endpoint is not a reliable substitute here: on Windows it
-    # sends the M-SEARCH out the wrong interface and receives no replies.
+async def _ssdp_locations(timeout: float) -> set[str]:
+    # Non-blocking UDP multicast driven by the running loop, so a cancelled
+    # discover() tears the socket down immediately instead of leaving a thread
+    # to run out its timeout. We keep an explicit deadline because SSDP replies
+    # trickle in one datagram at a time until the window closes.
+    loop = asyncio.get_running_loop()
     locations: set[str] = set()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as sock:
-        sock.settimeout(timeout)
-        sock.sendto(_SSDP_SEARCH_MESSAGE, _SSDP_ADDRESS)
-        while True:
+        sock.setblocking(False)
+        await loop.sock_sendto(sock, _SSDP_SEARCH_MESSAGE, _SSDP_ADDRESS)
+
+        deadline = loop.time() + timeout
+        while (remaining := deadline - loop.time()) > 0:
             try:
-                data, _ = sock.recvfrom(65535)
+                data, _ = await asyncio.wait_for(
+                    loop.sock_recvfrom(sock, 65535), remaining
+                )
             except TimeoutError:
                 break
             _, headers = parse_headers(data.decode(errors="ignore"))
@@ -84,32 +117,40 @@ def _ssdp_locations(timeout: float) -> set[str]:
     return locations
 
 
-async def _speakers_from_locations(locations: Iterable[str], timeout: float) -> tuple[Speaker, ...]:
+async def _speakers_from_locations(
+    locations: Iterable[str], timeout: float
+) -> tuple[Speaker, ...]:
     async with httpx.AsyncClient(timeout=timeout) as client:
         tasks = [_speaker_from_location(client, location) for location in locations]
         results = await asyncio.gather(*tasks)
-    speakers = {speaker.uid or speaker.ip: speaker for speaker in results if speaker is not None}
+    speakers = {
+        speaker.uid or speaker.ip: speaker for speaker in results if speaker is not None
+    }
     return tuple(speakers.values())
 
 
-async def _speaker_from_location(client: httpx.AsyncClient, location: str) -> Speaker | None:
+async def _speaker_from_location(
+    client: httpx.AsyncClient, location: str
+) -> Speaker | None:
     try:
         response = await client.get(location)
         response.raise_for_status()
         return _speaker_from_device_xml(location, response.text)
-    except httpx.HTTPError, ElementTree.ParseError, ValueError:
+    except (httpx.HTTPError, ElementTree.ParseError, ValueError):
         return None
 
 
 def _speaker_from_device_xml(location: str, xml_text: str) -> Speaker:
     parsed = urlparse(location)
     root = ElementTree.fromstring(xml_text)
-    device = _first(root, "device")
+    device = _first(root, DeviceTag.DEVICE)
     if device is None:
         device = root
-    room = _text(device, "roomName") or _text(device, "friendlyName")
-    uid = _text(device, "UDN").removeprefix("uuid:")
-    return Speaker(ip=parsed.hostname or "", port=parsed.port or 1400, room_name=room, uid=uid)
+    room = _text(device, DeviceTag.ROOM_NAME) or _text(device, DeviceTag.FRIENDLY_NAME)
+    uid = _text(device, DeviceTag.UDN).removeprefix(_UUID_PREFIX)
+    return Speaker(
+        ip=parsed.hostname or "", port=parsed.port or 1400, room_name=room, uid=uid
+    )
 
 
 async def _topology_from_speakers(
@@ -141,31 +182,34 @@ def _parse_topology(
     speakers: dict[str, Speaker] = {}
     groups: list[Group] = []
     for zone_group in root.iter():
-        if local_name(zone_group.tag) != "ZoneGroup":
+        if local_name(zone_group.tag) != ZoneTag.GROUP:
             continue
-        group_id = zone_group.attrib.get("ID", "")
-        coordinator_uid = zone_group.attrib.get("Coordinator", "")
+        group_id = zone_group.attrib.get(ZoneAttr.ID, "")
+        coordinator_uid = zone_group.attrib.get(ZoneAttr.COORDINATOR, "")
         members: list[Speaker] = []
         for member in list(zone_group):
-            if local_name(member.tag) != "ZoneGroupMember":
+            if local_name(member.tag) != ZoneTag.MEMBER:
                 continue
-            uid = member.attrib.get("UUID", "")
-            location = member.attrib.get("Location", "")
+            uid = member.attrib.get(ZoneAttr.UUID, "")
+            location = member.attrib.get(ZoneAttr.LOCATION, "")
             parsed = urlparse(location)
             base = known.get(uid)
+            zone_name = member.attrib.get(ZoneAttr.ZONE_NAME, "")
             speaker = Speaker(
                 ip=parsed.hostname or (base.ip if base else ""),
                 port=parsed.port or (base.port if base else 1400),
-                room_name=member.attrib.get("ZoneName", "") or (base.room_name if base else ""),
+                room_name=zone_name or (base.room_name if base else ""),
                 uid=uid,
-                zone_name=member.attrib.get("ZoneName", ""),
+                zone_name=zone_name,
                 coordinator_uid=coordinator_uid,
                 is_coordinator=uid == coordinator_uid,
-                invisible=member.attrib.get("Invisible", "0") == "1",
+                invisible=member.attrib.get(ZoneAttr.INVISIBLE, "0") == "1",
             )
             speakers[uid or speaker.ip] = speaker
             members.append(speaker)
-        groups.append(Group(id=group_id, coordinator_uid=coordinator_uid, members=tuple(members)))
+        groups.append(
+            Group(id=group_id, coordinator_uid=coordinator_uid, members=tuple(members))
+        )
     return tuple(speakers.values()), tuple(groups)
 
 

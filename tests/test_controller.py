@@ -1,6 +1,13 @@
+from __future__ import annotations
+
 import asyncio
 
+import pytest
+
+import sonosify.controller as controller_module
 from sonosify import AVTransportEvent, SonosController, TransportState
+from sonosify.models import Group, Speaker
+from sonosify.topology import SonosSystem
 
 
 class _FakeWatcher:
@@ -43,17 +50,21 @@ class _FakeClient:
         return self._watcher
 
 
-def test_controller_watch_flattens_client_and_subscription() -> None:
+def test_controller_watch_flattens_client_and_subscription(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     events = [AVTransportEvent(values={}, transport_state=TransportState.PLAYING)]
     watcher = _FakeWatcher(events)
     client = _FakeClient(watcher)
 
     controller = SonosController()
 
-    async def fake_client(room=None, *, ip=None, coordinator=True):  # type: ignore[no-untyped-def]
+    async def fake_client(  # type: ignore[no-untyped-def]
+        _controller, room=None, *, ip=None, coordinator=True
+    ):
         return client
 
-    controller.client = fake_client  # type: ignore[method-assign]
+    monkeypatch.setattr(SonosController, "client", fake_client)
 
     async def run() -> list[object]:
         seen: list[object] = []
@@ -68,3 +79,160 @@ def test_controller_watch_flattens_client_and_subscription() -> None:
     assert seen == events
     assert watcher.entered and watcher.exited
     assert client.closed
+
+
+def test_controller_configuration_is_read_only() -> None:
+    controller = SonosController(timeout=3.0, discovery_timeout=1.5)
+
+    assert controller.timeout == 3.0
+    assert controller.discovery_timeout == 1.5
+    assert controller.include_invisible is False
+    assert controller.system is None
+    with pytest.raises(AttributeError):
+        controller.timeout = 5.0  # type: ignore[misc]
+
+
+def test_controller_discover_caches_system(monkeypatch: pytest.MonkeyPatch) -> None:
+    speaker = Speaker(ip="192.168.1.10", room_name="Kitchen", uid="k")
+    system = SonosSystem(
+        (speaker,), (Group(id="g", coordinator_uid="k", members=(speaker,)),)
+    )
+
+    calls: list[dict[str, object]] = []
+
+    async def fake_discover(*, timeout, discovery_timeout, include_invisible):  # type: ignore[no-untyped-def]
+        calls.append(
+            {
+                "timeout": timeout,
+                "discovery_timeout": discovery_timeout,
+                "include_invisible": include_invisible,
+            }
+        )
+        return system
+
+    monkeypatch.setattr(controller_module, "discover", fake_discover)
+
+    controller = SonosController(timeout=2.0, discovery_timeout=1.0)
+    result = asyncio.run(controller.discover())
+
+    assert result is system
+    assert controller.system is system
+    assert calls == [
+        {"timeout": 2.0, "discovery_timeout": 1.0, "include_invisible": False}
+    ]
+
+
+def test_controller_client_reuses_cached_system(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    speaker = Speaker(
+        ip="192.168.1.10", room_name="Kitchen", uid="k", is_coordinator=True
+    )
+    system = SonosSystem((speaker,), ())
+
+    async def fail_discover(*args: object, **kwargs: object) -> SonosSystem:
+        raise AssertionError("discover() should not be called when system is cached")
+
+    monkeypatch.setattr(controller_module, "discover", fail_discover)
+
+    controller = SonosController()
+    controller._system = system  # noqa: SLF001 - seeding the cache for the test
+
+    client = asyncio.run(controller.client("Kitchen"))
+
+    assert client.ip == "192.168.1.10"
+
+
+def test_controller_client_triggers_discovery_when_uncached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    speaker = Speaker(
+        ip="192.168.1.10", room_name="Kitchen", uid="k", is_coordinator=True
+    )
+    system = SonosSystem((speaker,), ())
+
+    async def fake_discover(*, timeout, discovery_timeout, include_invisible):  # type: ignore[no-untyped-def]
+        return system
+
+    monkeypatch.setattr(controller_module, "discover", fake_discover)
+
+    controller = SonosController()
+    client = asyncio.run(controller.client("Kitchen"))
+
+    assert client.ip == "192.168.1.10"
+    assert controller.system is system
+
+
+def test_controller_client_with_ip_bypasses_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_discover(*args: object, **kwargs: object) -> SonosSystem:
+        raise AssertionError("direct IP access must not perform discovery")
+
+    monkeypatch.setattr(controller_module, "discover", fail_discover)
+
+    client = asyncio.run(SonosController(timeout=3).client(ip="192.168.1.10"))
+
+    assert client.ip == "192.168.1.10"
+
+
+class _RecordingClient:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def __aenter__(self) -> _RecordingClient:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def play(self) -> None:
+        self.calls.append("play")
+
+    async def pause(self) -> None:
+        self.calls.append("pause")
+
+    async def stop(self) -> None:
+        self.calls.append("stop")
+
+    async def set_volume(self, volume: int) -> None:
+        self.calls.append(f"set_volume:{volume}")
+
+
+def test_controller_convenience_method_opens_and_closes_a_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Representative check that play/pause/stop all share this delegation
+    # shape (open a client for `room`, call the matching method, let the
+    # context manager close it) -- there's no per-method branching to justify
+    # testing all three individually.
+    recording_client = _RecordingClient()
+
+    async def fake_client(self, room=None, *, ip=None, coordinator=True):  # type: ignore[no-untyped-def]
+        return recording_client
+
+    monkeypatch.setattr(SonosController, "client", fake_client)
+
+    controller = SonosController()
+    asyncio.run(controller.play("Kitchen"))
+
+    assert recording_client.calls == ["play"]
+
+
+def test_controller_set_volume_targets_non_coordinator_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recording_client = _RecordingClient()
+    seen_kwargs: dict[str, object] = {}
+
+    async def fake_client(self, room=None, *, ip=None, coordinator=True):  # type: ignore[no-untyped-def]
+        seen_kwargs["coordinator"] = coordinator
+        return recording_client
+
+    monkeypatch.setattr(SonosController, "client", fake_client)
+
+    controller = SonosController()
+    asyncio.run(controller.set_volume(30, "Kitchen"))
+
+    assert recording_client.calls == ["set_volume:30"]
+    assert seen_kwargs["coordinator"] is False

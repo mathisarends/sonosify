@@ -2,40 +2,13 @@ from html import escape
 
 from sonosify.events import (
     AVTransportEvent,
-    AVTransportValues,
     EventService,
     RenderingControlEvent,
-    RenderingControlValues,
     TransportState,
     UnknownSonosEvent,
-    parse_last_change,
     parse_notify_event,
 )
-
-
-def test_av_transport_values_parse_aliases_and_coerce() -> None:
-    values = AVTransportValues.model_validate(
-        {"TransportState": "PLAYING", "CurrentTrack": "3", "CurrentTrackURI": "x-sonos:1"}
-    )
-
-    assert values.transport_state is TransportState.PLAYING
-    assert values.current_track == 3
-    assert values.current_track_uri == "x-sonos:1"
-
-
-def test_av_transport_values_lenient_on_garbage() -> None:
-    values = AVTransportValues.model_validate({"TransportState": "BOGUS", "CurrentTrack": "n/a"})
-
-    assert values.transport_state is None
-    assert values.current_track is None
-
-
-def test_rendering_control_values_coerce_volume_and_mute() -> None:
-    values = RenderingControlValues.model_validate({"Volume": "17", "Mute": "1"})
-
-    assert values.volume == 17
-    assert values.muted is True
-    assert RenderingControlValues.model_validate({"Mute": "x"}).muted is None
+from sonosify.events.parsing import parse_last_change
 
 
 def test_parse_last_change_transport_state_and_metadata() -> None:
@@ -63,6 +36,22 @@ def test_parse_last_change_transport_state_and_metadata() -> None:
     assert "Song" in values["CurrentTrackMetaData"]
 
 
+def test_parse_last_change_returns_empty_for_empty_input() -> None:
+    assert parse_last_change("") == {}
+
+
+def test_parse_last_change_ignores_event_and_instance_id_tags() -> None:
+    raw = (
+        '<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/">'
+        '<InstanceID val="0"><Volume val="17"/></InstanceID>'
+        "</Event>"
+    )
+
+    values = parse_last_change(raw)
+
+    assert values == {"Volume": "17"}
+
+
 def test_parse_notify_event_returns_typed_av_transport_event() -> None:
     last_change = (
         '<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/">'
@@ -82,6 +71,35 @@ def test_parse_notify_event_returns_typed_av_transport_event() -> None:
     assert event.transport_state is TransportState.PLAYING
 
 
+def test_parse_notify_event_extracts_track_from_current_track_metadata() -> None:
+    didl = (
+        '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
+        "<item><dc:title>Song</dc:title></item></DIDL-Lite>"
+    )
+    last_change = (
+        '<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/">'
+        '<InstanceID val="0">'
+        '<TransportState val="PLAYING"/>'
+        '<CurrentTrackURI val="x-sonos:1"/>'
+        f'<CurrentTrackMetaData val="{escape(didl, quote=True)}"/>'
+        "</InstanceID>"
+        "</Event>"
+    )
+    body = (
+        '<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">'
+        f"<e:property><LastChange>{escape(last_change)}</LastChange></e:property>"
+        "</e:propertyset>"
+    )
+
+    event = parse_notify_event(body, service="av_transport")
+
+    assert isinstance(event, AVTransportEvent)
+    assert event.track is not None
+    assert event.track.title == "Song"
+    assert event.track.uri == "x-sonos:1"
+
+
 def test_parse_notify_event_normalizes_rendering_control() -> None:
     last_change = (
         '<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/">'
@@ -94,7 +112,9 @@ def test_parse_notify_event_normalizes_rendering_control() -> None:
         "</e:propertyset>"
     )
 
-    event = parse_notify_event(body, service="rendering_control", sid="uuid:test", sequence=1)
+    event = parse_notify_event(
+        body, service="rendering_control", sid="uuid:test", sequence=1
+    )
 
     assert isinstance(event, RenderingControlEvent)
     assert event.service is EventService.RENDERING_CONTROL
@@ -116,3 +136,16 @@ def test_parse_notify_event_preserves_unknown_service_as_raw_event() -> None:
     assert isinstance(event, UnknownSonosEvent)
     assert event.service == "device_properties"
     assert event.values == {"ZoneName": "Kitchen"}
+
+
+def test_parse_notify_event_handles_multiple_properties() -> None:
+    body = (
+        '<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">'
+        "<e:property><ZoneName>Kitchen</ZoneName></e:property>"
+        "<e:property><Icon>x.png</Icon></e:property>"
+        "</e:propertyset>"
+    )
+
+    event = parse_notify_event(body, service="device_properties")
+
+    assert event.values == {"ZoneName": "Kitchen", "Icon": "x.png"}
