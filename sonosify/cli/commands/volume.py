@@ -1,6 +1,5 @@
 from typing import Annotated
 
-from sonosify import SonosClient
 from sonosify.cli._dependencies import typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_action, print_object
@@ -54,12 +53,6 @@ async def volume(
         print_action(f"volume set to [cyan]{clamped}[/]", {"volume": clamped})
 
 
-async def adjust_volume(client: SonosClient, delta: int) -> int:
-    new_level = max(0, min(100, await client.get_volume() + delta))
-    await client.set_volume(new_level)
-    return new_level
-
-
 @async_command
 async def volume_up(
     room: RoomArg = None,
@@ -70,7 +63,7 @@ async def volume_up(
 ) -> None:
     """Raise a speaker's volume by a number of percentage points."""
     async with client_for(room, ip, coordinator=False) as client:
-        new_level = await adjust_volume(client, amount)
+        new_level = await client.adjust_volume(amount)
     print_action(f"volume [green]{new_level}[/]", {"volume": new_level})
 
 
@@ -84,7 +77,7 @@ async def volume_down(
 ) -> None:
     """Lower a speaker's volume by a number of percentage points."""
     async with client_for(room, ip, coordinator=False) as client:
-        new_level = await adjust_volume(client, -amount)
+        new_level = await client.adjust_volume(-amount)
     print_action(f"volume [yellow]{new_level}[/]", {"volume": new_level})
 
 
