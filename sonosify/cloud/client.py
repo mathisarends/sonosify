@@ -128,7 +128,7 @@ class SonosCloudClient:
             )
         return matches[0].id
 
-    async def load_audio_clip(
+    async def play_audio_clip(
         self,
         player_id: str,
         stream_url: str | None = None,
@@ -141,7 +141,7 @@ class SonosCloudClient:
         http_authorization: str | None = None,
         led_behavior: ClipLEDBehavior = ClipLEDBehavior.NONE,
     ) -> AudioClip:
-        """Schedule an MP3/WAV clip, or a built-in chime, on a player."""
+        """Schedule playback through the Sonos ``loadAudioClip`` command."""
         effective_app_id = app_id or self._app_id
         if not effective_app_id:
             raise CloudConfigurationError(_APP_ID_ENV)

@@ -12,7 +12,7 @@ async def main(player: str, stream_url: str) -> None:
             if player.startswith("RINCON_")
             else (await sonos.resolve_player(player)).id
         )
-        clip = await sonos.load_audio_clip(
+        clip = await sonos.play_audio_clip(
             target,
             stream_url,
             name="sonosify example",

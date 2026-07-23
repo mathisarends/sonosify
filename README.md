@@ -151,7 +151,7 @@ async def main():
     # await auth.async_exchange_code("CODE_FROM_CALLBACK")
 
     async with SonosCloudClient(auth, app_id="com.example.voice-agent") as sonos:
-        clip = await sonos.load_audio_clip(
+        clip = await sonos.play_audio_clip(
             "RINCON_12345678901400:1",
             "http://192.168.1.50:8000/tts/response.mp3",
             name="Agent Voice",
@@ -162,6 +162,9 @@ async def main():
 
 asyncio.run(main())
 ```
+
+`play_audio_clip` schedules playback using the Sonos Control API's
+`loadAudioClip` command and returns the clip ID needed to cancel it.
 
 `SonosCloudAuth` builds authorization URLs, exchanges authorization codes,
 caches access/refresh tokens in the platform config directory, and refreshes

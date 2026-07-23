@@ -76,7 +76,7 @@ def test_households_and_topology_are_typed() -> None:
     assert requests[1].url.path.endswith("/households/Sonos_123/groups")
 
 
-def test_load_audio_clip_builds_documented_payload() -> None:
+def test_play_audio_clip_builds_documented_payload() -> None:
     seen: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -100,7 +100,7 @@ def test_load_audio_clip_builds_documented_payload() -> None:
                 app_id="com.example.agent",
                 http_client=http,
             )
-            clip = await client.load_audio_clip(
+            clip = await client.play_audio_clip(
                 "RINCON_123:1",
                 "https://media.example.test/voice.mp3",
                 name="Agent",
@@ -128,7 +128,7 @@ def test_audio_clip_requires_app_id_and_valid_url() -> None:
     async def run() -> None:
         async with SonosCloudClient(_auth()) as client:
             with pytest.raises(CloudConfigurationError):
-                await client.load_audio_clip("player", "https://example.test/a.mp3")
+                await client.play_audio_clip("player", "https://example.test/a.mp3")
 
     asyncio.run(run())
 

@@ -331,7 +331,7 @@ async def clip(
             if player.startswith("RINCON_")
             else (await client.resolve_player(player, household_id=household_id)).id
         )
-        result = await client.load_audio_clip(
+        result = await client.play_audio_clip(
             player_id,
             stream_url,
             name=name,
