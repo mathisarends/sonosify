@@ -9,6 +9,7 @@ from sonosify.cli.runtime import async_command, client_for
 app = typer.Typer(
     help="Inspect and manage a speaker queue.",
     invoke_without_command=True,
+    no_args_is_help=False,
 )
 
 

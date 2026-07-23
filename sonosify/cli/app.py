@@ -24,16 +24,23 @@ class GlobalOptionsGroup(typer.core.TyperGroup):
     """Allow root options to appear before or after a subcommand."""
 
     def parse_args(self, ctx: typer.Context, args: list[str]) -> list[str]:
+        config_set = args[:2] == ["config", "set"]
         root_options: list[str] = []
         remaining: list[str] = []
         index = 0
         while index < len(args):
             value = args[index]
-            if value in {"--format", "--timeout"} and index + 1 < len(args):
+            if (
+                value in {"--format", "--timeout"}
+                and index + 1 < len(args)
+                and not config_set
+            ):
                 root_options.extend((value, args[index + 1]))
                 index += 2
                 continue
-            if value.startswith(("--format=", "--timeout=")) or value == "--debug":
+            if (
+                value.startswith(("--format=", "--timeout=")) and not config_set
+            ) or value == "--debug":
                 root_options.append(value)
             else:
                 remaining.append(value)

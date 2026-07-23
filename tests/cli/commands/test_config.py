@@ -43,3 +43,14 @@ def test_setting_ip_clears_a_previously_set_room() -> None:
     config = settings.load_config()
     assert config["default_ip"] == "10.0.0.1"
     assert "default_room" not in config
+
+
+def test_config_set_keeps_its_format_and_timeout_options() -> None:
+    result = CliRunner().invoke(
+        app, ["config", "set", "--format", "json", "--timeout", "3"]
+    )
+
+    assert result.exit_code == 0
+    config = settings.load_config()
+    assert config["default_format"] == "json"
+    assert config["default_timeout"] == "3.0"

@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 from sonosify.cli.app import app
 from sonosify.cli.commands import queue as queue_module
+from sonosify.models import Track
 
 
 class _Client:
@@ -42,6 +43,25 @@ def test_enqueue_reports_playing_with_play_flag(
 
     assert result.exit_code == 0
     assert "playing" in result.output
+
+
+def test_queue_without_subcommand_lists_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ListingClient:
+        async def queue(self) -> list[Track]:
+            return [Track(title="Song", position=1)]
+
+    @asynccontextmanager
+    async def fake_client_for(room, ip, *, coordinator=True):
+        yield _ListingClient()
+
+    monkeypatch.setattr(queue_module, "client_for", fake_client_for)
+
+    result = CliRunner().invoke(app, ["queue", "--room", "Kitchen"])
+
+    assert result.exit_code == 0
+    assert "Song" in result.output
 
 
 def test_queue_management_commands(monkeypatch: pytest.MonkeyPatch) -> None:
