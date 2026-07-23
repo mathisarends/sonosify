@@ -1,11 +1,57 @@
-# sonosify
+# 🔊 sonosify
+
+![CI](https://github.com/mathisarends/sonosify/actions/workflows/ci.yaml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.13%20%7C%203.14-blue)
+![PyPI](https://img.shields.io/pypi/v/sonosify)
+![License](https://img.shields.io/badge/license-MIT-informational)
+
+Programmatic Python API for discovering and controlling Sonos speakers on a local
+network — plus an optional, agent-friendly command-line interface built on top of it.
 
 ![sonosify banner](static/sonosify_banner.png)
 
-Programmatic Python API for discovering and controlling Sonos speakers on a local network.
+This package ports the API core of `steipete/sonoscli` into Python. It ships two
+layers you can use independently:
 
-This package ports the API core of `steipete/sonoscli` into Python. An optional
-command-line interface is available via the `cli` extra (see below).
+- **Core library** (`sonosify`): an async Python API for discovery, playback,
+  volume, queue, groups, favorites, and live UPnP event subscriptions.
+- **CLI** (`sonosify` command, via the `cli` extra): a scriptable, JSON-first
+  command-line interface designed to be driven by humans and automation/agents
+  alike.
+
+## Installation
+
+Requires **Python 3.13 or 3.14**. Sonos speakers must be reachable on the same
+local network (SSDP discovery uses UDP multicast).
+
+Core library only:
+
+```powershell
+uv add sonosify
+# or: pip install sonosify
+```
+
+With the CLI (adds Typer + Rich):
+
+```powershell
+uv add "sonosify[cli]"
+# or: pip install "sonosify[cli]"
+```
+
+From a local checkout of this repository:
+
+```powershell
+uv pip install -e ".[cli]"
+```
+
+Setting up a development environment (dependency groups, tests, linting,
+pre-commit) is covered in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Kern (Core Python API)
+
+The core API is fully async and centers on two entry points: `SonosController`
+for household-wide operations (discovery, groups, watching) and `SonosClient`
+for talking to one speaker directly.
 
 ```python
 import asyncio
@@ -28,7 +74,7 @@ async def main():
 asyncio.run(main())
 ```
 
-Lower-level direct device access is also available:
+Lower-level direct device access is also available, bypassing discovery entirely:
 
 ```python
 import asyncio
@@ -43,6 +89,13 @@ async def main():
 
 asyncio.run(main())
 ```
+
+`SonosClient` covers transport control (`play`, `pause`, `stop`, `next`,
+`previous`, `seek`), volume/mute (`get_volume`, `set_volume`, `adjust_volume`,
+`set_mute`, `toggle_mute`), the queue (`queue`, `enqueue_uri`, `clear_queue`,
+`remove_queue_item`, `seek_queue`), playback modes (`set_shuffle`, `set_repeat`,
+`set_crossfade`, `configure_sleep_timer`), grouping (`join`, `unjoin`), favorites
+(`favorites`, `open_favorite`), and generic playback (`open`, `open_track`).
 
 Live updates use Sonos UPnP event subscriptions:
 
@@ -66,7 +119,12 @@ async def main():
 asyncio.run(main())
 ```
 
-The watch API starts a local HTTP callback server. Your OS firewall may ask whether Python can accept incoming connections.
+The watch API starts a local HTTP callback server. Your OS firewall may ask
+whether Python can accept incoming connections.
+
+Errors are typed and derive from `SonosifyError`: `SpeakerNotFoundError`,
+`AmbiguousSpeakerError` (carries `matches`), `DiscoveryError`, `NetworkError`,
+`UPnPError` (carries `code`/`description`), and `UnsupportedFeatureError`.
 
 See `examples/` for runnable scripts:
 
@@ -77,27 +135,33 @@ uv run python examples/watch.py Kitchen
 uv run python examples/play_radio.py Kitchen https://example.com/live.mp3 "Example Radio"
 ```
 
-## Command-line interface
+## Schnittstelle (Command-line interface)
 
-Install the optional CLI dependencies (Typer + Rich):
-
-```powershell
-uv pip install -e ".[cli]"
-# or, from PyPI: pip install "sonosify[cli]"
-```
-
-This exposes a `sonosify` command:
+Install the optional CLI dependencies (Typer + Rich) as shown above, then use
+the `sonosify` command:
 
 ```powershell
 sonosify discover --format json
 sonosify status --room Kitchen --format json
+sonosify now-playing --room Kitchen
 sonosify play --room Kitchen
 sonosify pause --all
+sonosify next --room Kitchen
+sonosify previous --room Kitchen
 sonosify set-volume 25 --room Kitchen
 sonosify set-volume 20 --group "Living Room"
+sonosify volume-up Kitchen 10
+sonosify volume-down Kitchen 10
 sonosify mute --room Kitchen --on
 sonosify queue --room Kitchen
 sonosify queue jump 7 --room Kitchen
+sonosify queue remove 3 --room Kitchen
+sonosify queue clear --room Kitchen
+sonosify enqueue "x-rincon-mp3radio://example.com/live.mp3" --room Kitchen
+sonosify open "https://example.com/live.mp3" --radio --title "Example Radio" --room Kitchen
+sonosify track SPOTIFY_TRACK_ID --room Kitchen
+sonosify favorites list --room Kitchen
+sonosify favorites play "Jazz FM" --room Kitchen
 sonosify seek 1:30 --room Kitchen
 sonosify shuffle on --room Kitchen
 sonosify repeat all --room Kitchen
@@ -107,7 +171,10 @@ sonosify group "Living Room" --with Kitchen --with Office
 sonosify ungroup --room Kitchen
 sonosify groups --format json
 sonosify ping --room Kitchen --format json
+sonosify doctor --room Kitchen --format json
 sonosify watch --room Kitchen --count 5 --format json
+sonosify commands --format json
+sonosify --version --format json
 ```
 
 ### Targeting a speaker
@@ -195,18 +262,31 @@ Stable exit codes are:
 | `4` | Discovery or network failure / timeout |
 | `5` | Sonos UPnP error (`upnp_code` and `description` are included) |
 
+### Favorites and media
+
+`favorites list` lists the Sonos favorites configured for a speaker's household;
+`favorites play NAME` plays one by exact title or unique substring match (an
+ambiguous match is rejected with the candidate titles listed). `open URL` starts
+playback of an arbitrary stream URL or Sonos-playable URI (`--radio`/`--title` set
+radio metadata for plain stream URLs), and `track TRACK_ID` plays a track by id,
+URI, or URL from an already-linked music service (`--next` enqueues as the
+next track, `--enqueue` only enqueues without starting playback).
+
 ### Queue, groups, and playback modes
 
-Queue management is available through `queue clear`, `queue remove POSITION`, and
-`queue jump POSITION`. `group`, `ungroup`, and `groups` expose multi-room grouping.
-Playback automation includes in-track `seek`, `shuffle`, `repeat`, `crossfade`, and
-the `sleep` timer.
+Queue management is available through `queue` (show), `enqueue`, `queue clear`,
+`queue remove POSITION`, and `queue jump POSITION`. `group`, `ungroup`, and
+`groups` expose multi-room grouping. Playback automation includes in-track
+`seek`, `shuffle`, `repeat`, `crossfade`, and the `sleep` timer.
 
 The legacy overloaded `volume` command remains available. Agents should prefer the
 unambiguous `get-volume` and `set-volume` commands.
 
 Use `sonosify commands --format json` for recursive command/parameter
 introspection and `sonosify --version --format json` for feature detection.
+`sonosify doctor` runs a basic connectivity and service health check on a
+speaker (round-trip latency plus a live volume read), separate from the plain
+reachability check of `ping`.
 
 ### Debugging
 
@@ -217,10 +297,20 @@ traces to stderr:
 sonosify --debug volume Kitchen
 ```
 
-`sonosify track ...` expects a track id, track URI, or track URL. Playback works when
-the corresponding music service is already linked on your Sonos household.
+Playback of `track` and `open` works when the corresponding music service is
+already linked on your Sonos household.
 
 Exports are collected in `sonosify.__init__` for library consumers. The agent CLI
 work also adds `RepeatMode`, `NetworkError`, `SonosClient.seek`,
 `get_play_mode`/`set_play_mode`, `set_shuffle`, `set_repeat`,
 `get_crossfade`/`set_crossfade`, and `configure_sleep_timer` to the Python API.
+
+## Contributing
+
+Bug reports and pull requests are welcome. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, test/lint
+commands, and what CI checks on every push.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
