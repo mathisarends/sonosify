@@ -5,11 +5,17 @@ from sonosify.cli._dependencies import typer
 from sonosify.cli.console import console
 from sonosify.cli.state import OutputFormat, state
 
+SCHEMA_VERSION = 1
+
+
+def envelope(data: dict[str, object]) -> dict[str, object]:
+    return {"schema_version": SCHEMA_VERSION, **data}
+
 
 def print_action(message: str, data: dict[str, object]) -> None:
     match state.format:
         case OutputFormat.JSON:
-            typer.echo(json.dumps(data))
+            typer.echo(json.dumps(envelope(data)))
         case OutputFormat.TSV:
             typer.echo("\t".join(str(value) for value in data.values()))
         case _:
@@ -19,7 +25,7 @@ def print_action(message: str, data: dict[str, object]) -> None:
 def print_object(data: dict[str, object], plain: Callable[[], None]) -> None:
     match state.format:
         case OutputFormat.JSON:
-            typer.echo(json.dumps(data))
+            typer.echo(json.dumps(envelope(data)))
         case OutputFormat.TSV:
             for key, value in data.items():
                 typer.echo(f"{key}\t{value}")
@@ -34,7 +40,11 @@ def print_records(
 ) -> None:
     match state.format:
         case OutputFormat.JSON:
-            typer.echo(json.dumps(records))
+            typer.echo(
+                json.dumps(
+                    {"schema_version": SCHEMA_VERSION, "items": records},
+                )
+            )
         case OutputFormat.TSV:
             typer.echo("\t".join(headers))
             for record in records:

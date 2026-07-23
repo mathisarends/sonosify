@@ -61,6 +61,40 @@ def test_now_playing_reports_nothing_playing_when_no_track(
     assert "nothing playing" in result.output
 
 
+def test_status_returns_combined_numeric_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _StatusClient(_NowPlayingClient):
+        uid = "RINCON_1"
+
+        async def get_volume(self) -> int:
+            return 25
+
+        async def get_mute(self) -> bool:
+            return False
+
+    playback = PlaybackState(
+        state="PLAYING",
+        track=Track(title="Song", duration="0:03:30"),
+        relative_time="0:01:00",
+    )
+
+    @asynccontextmanager
+    async def fake_client_for(room, ip, *, coordinator=True):
+        yield _StatusClient(playback)
+
+    monkeypatch.setattr(discovery, "client_for", fake_client_for)
+
+    result = CliRunner().invoke(app, ["status", "--format", "json"])
+
+    assert result.exit_code == 0
+    data = __import__("json").loads(result.stdout)
+    assert data["position_s"] == 60
+    assert data["duration_s"] == 210
+    assert data["volume"] == 25
+    assert data["muted"] is False
+
+
 class _Watcher:
     def __init__(self, events: list[object]) -> None:
         self.ip = "192.168.1.10"
@@ -127,3 +161,23 @@ def test_watch_stops_quietly_on_cancellation(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result.exit_code == 0
     assert "stopped watching" in result.output
+
+
+def test_watch_json_is_ndjson_and_stops_at_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = [
+        RenderingControlEvent(values={}, volume=20, muted=False),
+        RenderingControlEvent(values={}, volume=21, muted=False),
+    ]
+    monkeypatch.setattr(
+        discovery, "SonosController", lambda **kwargs: _FakeController(events)
+    )
+
+    result = CliRunner().invoke(app, ["watch", "--count", "1", "--format", "json"])
+
+    assert result.exit_code == 0
+    lines = result.stdout.strip().splitlines()
+    assert len(lines) == 1
+    assert __import__("json").loads(lines[0])["volume"] == 20
+    assert "watching 192.168.1.10" in result.stderr

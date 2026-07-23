@@ -3,18 +3,30 @@ from typing import Annotated
 from sonosify.cli._dependencies import Table, typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_action, print_records
-from sonosify.cli.parameters import IpOpt, RoomArg
+from sonosify.cli.parameters import IpOpt, RoomArg, RoomOpt
 from sonosify.cli.runtime import async_command, client_for
 
+app = typer.Typer(
+    help="Inspect and manage a speaker queue.",
+    invoke_without_command=True,
+)
 
-def register(app: typer.Typer) -> None:
-    app.command()(queue)
-    app.command()(enqueue)
+
+def register(root: typer.Typer) -> None:
+    root.add_typer(app, name="queue")
+    root.command()(enqueue)
 
 
+@app.callback()
 @async_command
-async def queue(room: RoomArg = None, ip: IpOpt = None) -> None:
+async def queue(
+    ctx: typer.Context,
+    room: RoomOpt = None,
+    ip: IpOpt = None,
+) -> None:
     """Show the playback queue of a speaker."""
+    if ctx.invoked_subcommand is not None:
+        return
     async with client_for(room, ip) as client:
         tracks = await client.queue()
     records: list[dict[str, object]] = [
@@ -34,6 +46,42 @@ async def queue(room: RoomArg = None, ip: IpOpt = None) -> None:
         console.print(table)
 
     print_records(records, ["position", "title"], plain)
+
+
+@app.command("clear")
+@async_command
+async def clear_queue(room: RoomArg = None, ip: IpOpt = None) -> None:
+    """Remove every item from the queue."""
+    async with client_for(room, ip) as client:
+        await client.clear_queue()
+    print_action("[green]queue cleared[/]", {"status": "cleared"})
+
+
+@app.command("remove")
+@async_command
+async def remove_queue_item(
+    position: Annotated[int, typer.Argument(min=1, help="Queue position to remove.")],
+    room: RoomArg = None,
+    ip: IpOpt = None,
+) -> None:
+    """Remove one queue item by its one-based position."""
+    async with client_for(room, ip) as client:
+        await client.remove_queue_item(position)
+    print_action("[green]queue item removed[/]", {"position": position})
+
+
+@app.command("jump")
+@async_command
+async def jump_queue(
+    position: Annotated[int, typer.Argument(min=1, help="Queue position to play.")],
+    room: RoomArg = None,
+    ip: IpOpt = None,
+) -> None:
+    """Jump to and play one queue item."""
+    async with client_for(room, ip) as client:
+        await client.seek_queue(position)
+        await client.play()
+    print_action("[green]queue position playing[/]", {"position": position})
 
 
 @async_command

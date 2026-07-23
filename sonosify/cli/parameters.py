@@ -8,6 +8,14 @@ RoomArg = Annotated[
         help="Room name or unique substring; defaults to the configured speaker.",
     ),
 ]
+RoomOpt = Annotated[
+    str | None,
+    typer.Option(
+        "--room",
+        "-r",
+        help="Target room; defaults to the configured speaker.",
+    ),
+]
 IpOpt = Annotated[
     str | None,
     typer.Option("--ip", help="Target a speaker by IP address instead of room name."),

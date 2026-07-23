@@ -23,20 +23,32 @@ def test_command_topology() -> None:
     root = get_command(app)
 
     assert set(root.commands) == {
+        "commands",
         "config",
+        "crossfade",
         "discover",
+        "doctor",
         "enqueue",
         "favorites",
+        "group",
+        "groups",
         "mute",
         "next",
         "now-playing",
         "open",
         "pause",
+        "ping",
         "play",
         "previous",
         "queue",
+        "repeat",
+        "seek",
+        "shuffle",
+        "sleep",
         "stop",
+        "status",
         "track",
+        "ungroup",
         "volume",
         "volume-down",
         "volume-up",
@@ -44,6 +56,7 @@ def test_command_topology() -> None:
     }
     assert set(root.commands["favorites"].commands) == {"list", "play"}
     assert set(root.commands["config"].commands) == {"clear", "set", "show"}
+    assert set(root.commands["queue"].commands) == {"clear", "jump", "remove"}
 
 
 @pytest.fixture(autouse=True)
@@ -80,6 +93,27 @@ def test_main_falls_back_to_config_defaults(monkeypatch: pytest.MonkeyPatch) -> 
     assert result.exit_code == 0
     assert state.format == OutputFormat.JSON
     assert state.timeout == 9.0
+
+
+def test_global_options_are_accepted_after_subcommand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_module, "load_config", lambda: {})
+
+    result = CliRunner().invoke(app, ["config", "show", "--format", "json"])
+
+    assert result.exit_code == 0
+    assert state.format is OutputFormat.JSON
+
+
+def test_version_and_command_introspection_are_machine_readable() -> None:
+    version_result = CliRunner().invoke(app, ["--format", "json", "--version"])
+    commands_result = CliRunner().invoke(app, ["commands", "--format", "json"])
+
+    assert version_result.exit_code == 0
+    assert '"version"' in version_result.stdout
+    assert commands_result.exit_code == 0
+    assert '"parameters"' in commands_result.stdout
 
 
 def test_main_debug_flag_attaches_debug_logging(

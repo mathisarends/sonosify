@@ -1,23 +1,23 @@
 import asyncio
+import json
+import re
+from contextlib import suppress
+from typing import Annotated
 
-from sonosify import (
-    AVTransportEvent,
-    RenderingControlEvent,
-    SonosController,
-    SonosSystem,
-)
+from sonosify import SonosController, SonosSystem
 from sonosify.cli._dependencies import Table, typer
 from sonosify.cli.console import console
 from sonosify.cli.output import print_object, print_records
 from sonosify.cli.parameters import IpOpt, RoomArg
 from sonosify.cli.runtime import async_command, client_for
 from sonosify.cli.settings import resolve_target, save_speaker_cache
-from sonosify.cli.state import state
+from sonosify.cli.state import OutputFormat, state
 
 
 def register(app: typer.Typer) -> None:
     app.command()(discover)
     app.command(name="now-playing")(now_playing)
+    app.command()(status)
     app.command()(watch)
 
 
@@ -75,6 +75,10 @@ async def now_playing(room: RoomArg = None, ip: IpOpt = None) -> None:
         "album": track.album if track else "",
         "position": playback.relative_time,
         "duration": playback.track_duration or (track.duration if track else ""),
+        "position_s": time_seconds(playback.relative_time),
+        "duration_s": time_seconds(
+            playback.track_duration or (track.duration if track else "")
+        ),
     }
 
     def plain() -> None:
@@ -94,22 +98,118 @@ async def now_playing(room: RoomArg = None, ip: IpOpt = None) -> None:
     print_object(data, plain)
 
 
+def time_seconds(value: str) -> int:
+    parts = value.split(":")
+    if not value or not all(part.isdigit() for part in parts):
+        return 0
+    return sum(int(part) * 60**index for index, part in enumerate(reversed(parts)))
+
+
+def duration_seconds(value: str | None) -> float | None:
+    if value is None:
+        return None
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)(ms|s|m|h)?", value.strip())
+    if not match:
+        raise typer.BadParameter("duration must look like 500ms, 10s, 2m, or 1h")
+    amount = float(match.group(1))
+    return amount * {"ms": 0.001, "s": 1, "m": 60, "h": 3600}.get(
+        match.group(2) or "s", 1
+    )
+
+
 @async_command
-async def watch(room: RoomArg = None, ip: IpOpt = None) -> None:
+async def status(room: RoomArg = None, ip: IpOpt = None) -> None:
+    """Return playback, volume, and mute state in one request."""
+    async with client_for(room, ip) as client:
+        playback, volume, muted = await asyncio.gather(
+            client.now_playing(),
+            client.get_volume(),
+            client.get_mute(),
+        )
+        track = playback.track
+        duration = playback.track_duration or (track.duration if track else "")
+        data: dict[str, object] = {
+            "state": playback.state or "UNKNOWN",
+            "volume": volume,
+            "muted": muted,
+            "track": track.model_dump() if track else None,
+            "group": client.uid,
+            "position": playback.relative_time,
+            "duration": duration,
+            "position_s": time_seconds(playback.relative_time),
+            "duration_s": time_seconds(duration),
+        }
+
+    def plain() -> None:
+        console.print(f"state: [cyan]{data['state']}[/]")
+        console.print(f"volume: [cyan]{volume}[/] muted: {muted}")
+        if track:
+            console.print(f"track: {track.title or track.uri}")
+
+    print_object(data, plain)
+
+
+@async_command
+async def watch(
+    room: RoomArg = None,
+    ip: IpOpt = None,
+    count: Annotated[
+        int | None, typer.Option("--count", min=1, help="Stop after N events.")
+    ] = None,
+    duration: Annotated[
+        str | None,
+        typer.Option("--duration", help="Stop after a duration such as 10s."),
+    ] = None,
+    until: Annotated[
+        str | None,
+        typer.Option("--until", help="Stop when this transport state is observed."),
+    ] = None,
+) -> None:
     """Stream live transport and volume events from a speaker."""
-    try:
+    limit = duration_seconds(duration)
+
+    async def consume() -> None:
         target_room, target_ip = resolve_target(room, ip)
         controller = SonosController(timeout=state.timeout)
         async with controller.watch(target_room, ip=target_ip) as watcher:
-            console.print(f"watching [cyan]{watcher.ip}[/]; press Ctrl+C to stop")
+            typer.echo(f"watching {watcher.ip}", err=True)
+            seen = 0
             async for event in watcher:
-                match event:
-                    case AVTransportEvent(transport_state=transport_state, track=track):
-                        title = track.title if track else ""
-                        console.print(f"transport {transport_state} {title}")
-                    case RenderingControlEvent(volume=volume, muted=muted):
-                        console.print(f"rendering volume={volume} muted={muted}")
-                    case _:
-                        console.print(f"{event.service} {event.values}")
+                seen += 1
+                data = event.model_dump(mode="json")
+                if state.format is OutputFormat.JSON:
+                    typer.echo(json.dumps({"schema_version": 1, **data}))
+                else:
+                    if event.service == "av_transport":
+                        console.print(
+                            f"transport {getattr(event, 'transport_state', None)} "
+                            f"{getattr(getattr(event, 'track', None), 'title', '')}"
+                        )
+                    elif event.service == "rendering_control":
+                        console.print(
+                            f"rendering volume={getattr(event, 'volume', None)} "
+                            f"muted={getattr(event, 'muted', None)}"
+                        )
+                    else:
+                        console.print(f"{event.service} {data}")
+                event_state = getattr(event, "transport_state", None)
+                if count is not None and seen >= count:
+                    break
+                if (
+                    until
+                    and event_state
+                    and event_state.value.casefold() == until.casefold()
+                ):
+                    break
+
+    try:
+        if limit is None:
+            await consume()
+        else:
+            async with asyncio.timeout(limit):
+                await consume()
+    except TimeoutError:
+        pass
     except asyncio.CancelledError:
-        console.print("\nstopped watching")
+        with suppress(Exception):
+            typer.echo("stopped watching", err=True)

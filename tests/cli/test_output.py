@@ -28,7 +28,11 @@ def test_print_action_json_emits_data(capsys: pytest.CaptureFixture[str]) -> Non
     print_action("ignored", {"status": "done", "value": 3})
 
     out = capsys.readouterr().out.strip()
-    assert json.loads(out) == {"status": "done", "value": 3}
+    assert json.loads(out) == {
+        "schema_version": 1,
+        "status": "done",
+        "value": 3,
+    }
 
 
 def test_print_action_tsv_emits_values_only(capsys: pytest.CaptureFixture[str]) -> None:
@@ -60,7 +64,7 @@ def test_print_object_json_emits_data(capsys: pytest.CaptureFixture[str]) -> Non
     print_object({"a": 1}, lambda: None)
 
     out = capsys.readouterr().out.strip()
-    assert json.loads(out) == {"a": 1}
+    assert json.loads(out) == {"schema_version": 1, "a": 1}
 
 
 def test_print_object_tsv_emits_key_value_lines(
@@ -93,7 +97,10 @@ def test_print_records_json_emits_list(capsys: pytest.CaptureFixture[str]) -> No
     print_records([{"a": 1}, {"a": 2}], ["a"], lambda: None)
 
     out = capsys.readouterr().out.strip()
-    assert json.loads(out) == [{"a": 1}, {"a": 2}]
+    assert json.loads(out) == {
+        "schema_version": 1,
+        "items": [{"a": 1}, {"a": 2}],
+    }
 
 
 def test_print_records_tsv_emits_header_and_rows(
