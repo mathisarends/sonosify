@@ -15,7 +15,9 @@ def test_int_or_none() -> None:
 
 
 def test_parse_headers_splits_start_line_and_casefolds_keys() -> None:
-    raw = "HTTP/1.1 200 OK\r\nLOCATION: http://host/x\r\nCACHE-CONTROL: max-age=1\r\n\r\n"
+    raw = (
+        "HTTP/1.1 200 OK\r\nLOCATION: http://host/x\r\nCACHE-CONTROL: max-age=1\r\n\r\n"
+    )
 
     start_line, headers = parse_headers(raw)
 

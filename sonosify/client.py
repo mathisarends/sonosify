@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Self
 
 import httpx
@@ -5,7 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from sonosify._parsing import int_or_none
 from sonosify.didl import parse_favorites, parse_track_metadata, radio_metadata
-from sonosify.events import DEFAULT_SERVICES, EventService, EventSubscription, TransportState
+from sonosify.events import (
+    DEFAULT_SERVICES,
+    EventService,
+    EventSubscription,
+    TransportState,
+)
 from sonosify.models import Favorite, PlaybackState, Speaker, Track
 from sonosify.soap import soap_call
 from sonosify.spotify import parse_track_id, track_metadata
@@ -74,7 +81,9 @@ class SonosClient:
         self._http = http_client or httpx.AsyncClient(timeout=timeout)
 
     @classmethod
-    def from_speaker(cls, speaker: Speaker, *, timeout: float = DEFAULT_TIMEOUT) -> Self:
+    def from_speaker(
+        cls, speaker: Speaker, *, timeout: float = DEFAULT_TIMEOUT
+    ) -> Self:
         return cls(speaker.ip, port=speaker.port, uid=speaker.uid, timeout=timeout)
 
     @property
@@ -111,7 +120,9 @@ class SonosClient:
 
     async def play_uri(self, uri: str, *, title: str = "", radio: bool = False) -> None:
         metadata = radio_metadata(title or uri, uri) if radio else ""
-        await self.__av_transport("SetAVTransportURI", CurrentURI=uri, CurrentURIMetaData=metadata)
+        await self.__av_transport(
+            "SetAVTransportURI", CurrentURI=uri, CurrentURIMetaData=metadata
+        )
         await self.play()
 
     async def open(
@@ -168,7 +179,8 @@ class SonosClient:
     async def tv(self) -> None:
         if not self.uid:
             raise ValueError(
-                "tv playback requires a SonosClient created from a discovered Speaker with uid"
+                "tv playback requires a SonosClient created from a "
+                "discovered Speaker with uid"
             )
         await self.play_uri(f"x-sonos-htastream:{self.uid}:spdif")
 
@@ -203,7 +215,9 @@ class SonosClient:
         return result.get("CurrentMute") == "1"
 
     async def set_mute(self, muted: bool) -> None:
-        await self._rendering("SetMute", Channel="Master", DesiredMute="1" if muted else "0")
+        await self._rendering(
+            "SetMute", Channel="Master", DesiredMute="1" if muted else "0"
+        )
 
     async def toggle_mute(self) -> bool:
         muted = not await self.get_mute()
@@ -353,7 +367,9 @@ class SonosClient:
         action: str,
         args: dict[str, object] | None = None,
     ) -> dict[str, str]:
-        return await soap_call(self._http, f"{self.base_url}{path}", service_urn, action, args)
+        return await soap_call(
+            self._http, f"{self.base_url}{path}", service_urn, action, args
+        )
 
     def _source_uid(self, source: Speaker | str | None) -> str:
         if isinstance(source, Speaker):

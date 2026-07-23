@@ -12,7 +12,9 @@ _SOAP_ENV_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 logger = logging.getLogger("sonosify.soap")
 
 
-def build_envelope(service_urn: str, action: str, args: Mapping[str, object] | None = None) -> str:
+def build_envelope(
+    service_urn: str, action: str, args: Mapping[str, object] | None = None
+) -> str:
     body = [
         '<?xml version="1.0"?>',
         f'<s:Envelope xmlns:s="{_SOAP_ENV_NS}" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">',
@@ -33,7 +35,9 @@ def parse_response(raw: str | bytes) -> dict[str, str]:
         return {}
 
     response = list(body)[0]
-    return {_local_name(child.tag): "".join(child.itertext()) for child in list(response)}
+    return {
+        _local_name(child.tag): "".join(child.itertext()) for child in list(response)
+    }
 
 
 def parse_upnp_error(raw: str | bytes) -> UPnPError | None:
@@ -76,7 +80,9 @@ async def soap_call(
             "SOAPACTION": f'"{service_urn}#{action}"',
         },
     )
-    logger.debug("<- %s %s#%s\n%s", response.status_code, service_urn, action, response.text)
+    logger.debug(
+        "<- %s %s#%s\n%s", response.status_code, service_urn, action, response.text
+    )
     if response.status_code == httpx.codes.OK:
         return parse_response(response.content)
 
@@ -89,7 +95,9 @@ async def soap_call(
     return {}
 
 
-def _find_by_local_name(root: ElementTree.Element, local_name: str) -> ElementTree.Element | None:
+def _find_by_local_name(
+    root: ElementTree.Element, local_name: str
+) -> ElementTree.Element | None:
     for element in root.iter():
         if _local_name(element.tag) == local_name:
             return element

@@ -41,7 +41,9 @@ async def discover(
 
     speakers = await _speakers_from_locations(locations, timeout)
     if not speakers:
-        raise DiscoveryError("Sonos speakers responded but no device metadata could be parsed")
+        raise DiscoveryError(
+            "Sonos speakers responded but no device metadata could be parsed"
+        )
 
     topology = await _topology_from_speakers(speakers, timeout)
     if topology:
@@ -84,20 +86,26 @@ def _ssdp_locations(timeout: float) -> set[str]:
     return locations
 
 
-async def _speakers_from_locations(locations: Iterable[str], timeout: float) -> tuple[Speaker, ...]:
+async def _speakers_from_locations(
+    locations: Iterable[str], timeout: float
+) -> tuple[Speaker, ...]:
     async with httpx.AsyncClient(timeout=timeout) as client:
         tasks = [_speaker_from_location(client, location) for location in locations]
         results = await asyncio.gather(*tasks)
-    speakers = {speaker.uid or speaker.ip: speaker for speaker in results if speaker is not None}
+    speakers = {
+        speaker.uid or speaker.ip: speaker for speaker in results if speaker is not None
+    }
     return tuple(speakers.values())
 
 
-async def _speaker_from_location(client: httpx.AsyncClient, location: str) -> Speaker | None:
+async def _speaker_from_location(
+    client: httpx.AsyncClient, location: str
+) -> Speaker | None:
     try:
         response = await client.get(location)
         response.raise_for_status()
         return _speaker_from_device_xml(location, response.text)
-    except httpx.HTTPError, ElementTree.ParseError, ValueError:
+    except (httpx.HTTPError, ElementTree.ParseError, ValueError):
         return None
 
 
@@ -109,7 +117,9 @@ def _speaker_from_device_xml(location: str, xml_text: str) -> Speaker:
         device = root
     room = _text(device, "roomName") or _text(device, "friendlyName")
     uid = _text(device, "UDN").removeprefix("uuid:")
-    return Speaker(ip=parsed.hostname or "", port=parsed.port or 1400, room_name=room, uid=uid)
+    return Speaker(
+        ip=parsed.hostname or "", port=parsed.port or 1400, room_name=room, uid=uid
+    )
 
 
 async def _topology_from_speakers(
@@ -156,7 +166,8 @@ def _parse_topology(
             speaker = Speaker(
                 ip=parsed.hostname or (base.ip if base else ""),
                 port=parsed.port or (base.port if base else 1400),
-                room_name=member.attrib.get("ZoneName", "") or (base.room_name if base else ""),
+                room_name=member.attrib.get("ZoneName", "")
+                or (base.room_name if base else ""),
                 uid=uid,
                 zone_name=member.attrib.get("ZoneName", ""),
                 coordinator_uid=coordinator_uid,
@@ -165,7 +176,9 @@ def _parse_topology(
             )
             speakers[uid or speaker.ip] = speaker
             members.append(speaker)
-        groups.append(Group(id=group_id, coordinator_uid=coordinator_uid, members=tuple(members)))
+        groups.append(
+            Group(id=group_id, coordinator_uid=coordinator_uid, members=tuple(members))
+        )
     return tuple(speakers.values()), tuple(groups)
 
 

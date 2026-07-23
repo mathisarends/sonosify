@@ -14,7 +14,9 @@ def test_speaker_from_device_xml_reads_room_and_uid() -> None:
 
     speaker = _speaker_from_device_xml("http://192.168.1.10:1400/xml/device.xml", xml)
 
-    assert speaker == Speaker(ip="192.168.1.10", port=1400, room_name="Kitchen", uid="RINCON_123")
+    assert speaker == Speaker(
+        ip="192.168.1.10", port=1400, room_name="Kitchen", uid="RINCON_123"
+    )
 
 
 def test_parse_topology_builds_speakers_and_group() -> None:

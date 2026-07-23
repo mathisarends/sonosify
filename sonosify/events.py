@@ -113,7 +113,9 @@ class EventSubscription:
         if self._server is not None:
             return
 
-        callback_host = self.callback_host or await asyncio.to_thread(_local_ip_for, self.ip)
+        callback_host = self.callback_host or await asyncio.to_thread(
+            _local_ip_for, self.ip
+        )
         self._server = await asyncio.start_server(
             self._handle_connection, callback_host, self.callback_port
         )
@@ -134,7 +136,9 @@ class EventSubscription:
             return await self._events.get()
         return await asyncio.wait_for(self._events.get(), timeout=timeout)
 
-    async def events(self, *, timeout: float | None = None) -> AsyncIterator[SonosEvent]:
+    async def events(
+        self, *, timeout: float | None = None
+    ) -> AsyncIterator[SonosEvent]:
         while True:
             yield await self.next_event(timeout=timeout)
 
@@ -173,7 +177,9 @@ class EventSubscription:
                 await self._events.put(event)
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
             else:
-                writer.write(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n")
+                writer.write(
+                    b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n"
+                )
             await writer.drain()
         finally:
             writer.close()
@@ -266,7 +272,9 @@ def parse_notify_event(
 
     normalized_service = _normalize_service(service)
     if normalized_service is None:
-        return UnknownSonosEvent(service=service, values=values, sequence=sequence, sid=sid)
+        return UnknownSonosEvent(
+            service=service, values=values, sequence=sequence, sid=sid
+        )
 
     event_data: dict[str, object] = {
         "service": normalized_service,

@@ -34,14 +34,24 @@ class SonosSystem(BaseModel):
             visible = [speaker for speaker in candidates if speaker.room_name]
             if len(visible) == 1:
                 return visible[0]
-            raise SpeakerNotFoundError("room name is required when multiple speakers are available")
+            raise SpeakerNotFoundError(
+                "room name is required when multiple speakers are available"
+            )
 
         normalized = query.casefold()
-        exact = [speaker for speaker in candidates if speaker.room_name.casefold() == normalized]
+        exact = [
+            speaker
+            for speaker in candidates
+            if speaker.room_name.casefold() == normalized
+        ]
         if len(exact) == 1:
             return exact[0]
 
-        fuzzy = [speaker for speaker in candidates if normalized in speaker.room_name.casefold()]
+        fuzzy = [
+            speaker
+            for speaker in candidates
+            if normalized in speaker.room_name.casefold()
+        ]
         if len(fuzzy) == 1:
             return fuzzy[0]
         if len(fuzzy) > 1:

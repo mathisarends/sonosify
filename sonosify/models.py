@@ -23,7 +23,9 @@ class Group(BaseModel):
 
     @property
     def coordinator(self) -> Speaker | None:
-        return next((speaker for speaker in self.members if speaker.is_coordinator), None)
+        return next(
+            (speaker for speaker in self.members if speaker.is_coordinator), None
+        )
 
 
 class Track(BaseModel):

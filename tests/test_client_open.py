@@ -31,9 +31,14 @@ def test_open_dispatches_favorite() -> None:
 def test_open_falls_back_to_play_uri() -> None:
     client = _Client()
 
-    position = asyncio.run(client.open("https://example.com/live.mp3", title="Radio", radio=True))
+    position = asyncio.run(
+        client.open("https://example.com/live.mp3", title="Radio", radio=True)
+    )
 
     assert position is None
     assert client.calls == [
-        ("play_uri", {"uri": "https://example.com/live.mp3", "title": "Radio", "radio": True})
+        (
+            "play_uri",
+            {"uri": "https://example.com/live.mp3", "title": "Radio", "radio": True},
+        )
     ]

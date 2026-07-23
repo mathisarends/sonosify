@@ -11,7 +11,9 @@ def test_system_finds_exact_and_fuzzy_room() -> None:
         coordinator_uid="k",
         is_coordinator=True,
     )
-    office = Speaker(ip="192.168.1.11", room_name="Office", uid="o", coordinator_uid="k")
+    office = Speaker(
+        ip="192.168.1.11", room_name="Office", uid="o", coordinator_uid="k"
+    )
     system = SonosSystem(
         speakers=(kitchen, office),
         groups=(Group(id="g", coordinator_uid="k", members=(kitchen, office)),),

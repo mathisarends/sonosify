@@ -15,7 +15,11 @@ from sonosify.events import (
 
 def test_av_transport_values_parse_aliases_and_coerce() -> None:
     values = AVTransportValues.model_validate(
-        {"TransportState": "PLAYING", "CurrentTrack": "3", "CurrentTrackURI": "x-sonos:1"}
+        {
+            "TransportState": "PLAYING",
+            "CurrentTrack": "3",
+            "CurrentTrackURI": "x-sonos:1",
+        }
     )
 
     assert values.transport_state is TransportState.PLAYING
@@ -24,7 +28,9 @@ def test_av_transport_values_parse_aliases_and_coerce() -> None:
 
 
 def test_av_transport_values_lenient_on_garbage() -> None:
-    values = AVTransportValues.model_validate({"TransportState": "BOGUS", "CurrentTrack": "n/a"})
+    values = AVTransportValues.model_validate(
+        {"TransportState": "BOGUS", "CurrentTrack": "n/a"}
+    )
 
     assert values.transport_state is None
     assert values.current_track is None
@@ -94,7 +100,9 @@ def test_parse_notify_event_normalizes_rendering_control() -> None:
         "</e:propertyset>"
     )
 
-    event = parse_notify_event(body, service="rendering_control", sid="uuid:test", sequence=1)
+    event = parse_notify_event(
+        body, service="rendering_control", sid="uuid:test", sequence=1
+    )
 
     assert isinstance(event, RenderingControlEvent)
     assert event.service is EventService.RENDERING_CONTROL
