@@ -128,9 +128,8 @@ variables take precedence over `.env`.
 
 ## Sonos Control API (`sonosify.cloud`)
 
-Cloud control is a regular submodule of the main package; there is no separate
-extra to install. See [Setting up cloud credentials](#setting-up-cloud-credentials)
-above to obtain a Client ID, Client Secret, and redirect URI before using it.
+See [Setting up cloud credentials](#setting-up-cloud-credentials) above to
+obtain a Client ID, Client Secret, and redirect URI before using it.
 
 The reusable API also accepts credentials explicitly:
 
