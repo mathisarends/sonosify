@@ -1,6 +1,6 @@
 [project]
 name = "sonosify"
-version = "0.4.0"
+version = "0.4.1"
 description = "Programmatic Python API for discovering and controlling Sonos speakers."
 readme = "README.md"
 license = "MIT"
