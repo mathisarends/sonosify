@@ -65,7 +65,6 @@ uv run pytest
 ## Project layout
 
 - `sonosify/` — the core async library (discovery, client, events, models)
-- `sonosify/cloud/` — OAuth2 and Sonos Control API client, models, and errors
 - `examples/` — small runnable scripts demonstrating the core API
 - `tests/` — the test suite
 
@@ -76,7 +75,7 @@ uv run pytest
 - Update `README.md` if you add, rename, or remove a public API symbol — the
   `sonosify.__init__` export list is expected to stay accurate.
 - Conventional, descriptive commit messages (e.g. `fix(client): ...`,
-  `feat(cloud): ...`) are appreciated but not required.
+  `feat(events): ...`) are appreciated but not required.
 
 ## Reporting issues
 

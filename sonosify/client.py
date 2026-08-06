@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from sonosify._parsing import int_or_none, local_name
 from sonosify._websocket import send_websocket_command
-from sonosify.cloud.models import (
+from sonosify.audio_clip import (
     AudioClip,
     ClipLEDBehavior,
     ClipPriority,
