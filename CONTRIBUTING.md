@@ -12,11 +12,11 @@ a pull request merged.
 
 ## Getting set up
 
-Clone the repository and install every dependency group, including the `cli`
-extra and the `dev` group (pytest, ruff, pre-commit):
+Clone the repository and install the `dev` dependency group (pytest, ruff,
+pre-commit):
 
 ```powershell
-uv sync --all-extras --dev
+uv sync --dev
 ```
 
 Install the pre-commit hooks so formatting/linting issues are caught before
@@ -66,8 +66,6 @@ uv run pytest
 
 - `sonosify/` — the core async library (discovery, client, events, models)
 - `sonosify/cloud/` — OAuth2 and Sonos Control API client, models, and errors
-- `sonosify/cli/` — the optional Typer-based CLI, one module per command group
-  under `sonosify/cli/commands/`
 - `examples/` — small runnable scripts demonstrating the core API
 - `tests/` — the test suite
 
@@ -75,14 +73,12 @@ uv run pytest
 
 - Keep pull requests focused; unrelated refactors make review harder.
 - Add or update tests for any behavior change.
-- Update `README.md` if you add, rename, or remove a CLI command or a public
-  API symbol — the CLI reference and the `sonosify.__init__` export list are
-  expected to stay accurate.
-- Conventional, descriptive commit messages (e.g. `fix(cli): ...`,
-  `feat(client): ...`) are appreciated but not required.
+- Update `README.md` if you add, rename, or remove a public API symbol — the
+  `sonosify.__init__` export list is expected to stay accurate.
+- Conventional, descriptive commit messages (e.g. `fix(client): ...`,
+  `feat(cloud): ...`) are appreciated but not required.
 
 ## Reporting issues
 
 Open an issue with as much detail as you can: Sonos model(s) involved, the
-command or code path, expected vs. actual behavior, and — for CLI issues —
-the output of the same command with `--debug` and `--format json`.
+code path involved, and expected vs. actual behavior.

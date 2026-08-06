@@ -57,6 +57,115 @@ def test_context_manager_closes_owned_http_client() -> None:
     assert _run(run()) is True
 
 
+def test_play_audio_clip_sends_local_control_api_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    async def send_command(*args: object, **kwargs: object) -> dict[str, object]:
+        calls.append((*args, kwargs))
+        return {
+            "id": "clip-1",
+            "name": "Agent",
+            "appId": "com.example.agent",
+            "priority": "HIGH",
+            "clipType": "VOICE_ASSISTANT",
+        }
+
+    monkeypatch.setattr(client_module, "send_websocket_command", send_command)
+    client = SonosClient("192.168.1.10", uid="RINCON_1", timeout=4.0)
+
+    clip = _run(
+        client.play_audio_clip(
+            "http://192.168.1.20/voice.mp3",
+            app_id="com.example.agent",
+            name="Agent",
+            volume=30,
+            priority=client_module.ClipPriority.HIGH,
+            clip_type=client_module.ClipType.VOICE_ASSISTANT,
+        )
+    )
+
+    assert clip.id == "clip-1"
+    assert calls == [
+        (
+            "192.168.1.10",
+            {
+                "namespace": "audioClip:1",
+                "command": "loadAudioClip",
+                "playerId": "RINCON_1",
+            },
+            {
+                "name": "Agent",
+                "appId": "com.example.agent",
+                "priority": "HIGH",
+                "clipLEDBehavior": "NONE",
+                "streamUrl": "http://192.168.1.20/voice.mp3",
+                "volume": 30,
+                "clipType": "VOICE_ASSISTANT",
+            },
+            {"timeout": 4.0},
+        )
+    ]
+
+
+def test_cancel_audio_clip_sends_clip_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    async def send_command(*args: object, **kwargs: object) -> dict[str, object]:
+        calls.append((*args, kwargs))
+        return {}
+
+    monkeypatch.setattr(client_module, "send_websocket_command", send_command)
+    client = SonosClient("192.168.1.10", uid="RINCON_1")
+
+    _run(client.cancel_audio_clip("clip-1"))
+
+    assert calls[0][1] == {
+        "namespace": "audioClip:1",
+        "command": "cancelAudioClip",
+        "playerId": "RINCON_1",
+    }
+    assert calls[0][2] == {"clipId": "clip-1"}
+
+
+def test_local_audio_clip_resolves_player_id_from_configured_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/xml/device_description.xml"
+        return httpx.Response(
+            200,
+            text=(
+                '<root xmlns="urn:schemas-upnp-org:device-1-0"><device>'
+                "<UDN>uuid:RINCON_DIRECT</UDN>"
+                "</device></root>"
+            ),
+        )
+
+    async def send_command(*args: object, **kwargs: object) -> dict[str, object]:
+        calls.append((*args, kwargs))
+        return {
+            "id": "clip-1",
+            "name": "Chime",
+            "appId": "com.example.agent",
+        }
+
+    monkeypatch.setattr(client_module, "send_websocket_command", send_command)
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = SonosClient("192.168.1.10", http_client=http)
+            await client.play_audio_clip(app_id="com.example.agent", name="Chime")
+            assert client.uid == "RINCON_DIRECT"
+
+    asyncio.run(run())
+
+    assert calls[0][1]["playerId"] == "RINCON_DIRECT"
+
+
 def test_close_leaves_externally_provided_http_client_open() -> None:
     async def run() -> bool:
         http = httpx.AsyncClient()

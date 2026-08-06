@@ -6,7 +6,7 @@
 ![License](https://img.shields.io/badge/license-MIT-informational)
 
 Programmatic Python API for discovering and controlling Sonos speakers on a local
-network — plus an optional, agent-friendly command-line interface built on top of it.
+network.
 
 ![sonosify banner](static/sonosify_banner.png)
 
@@ -18,9 +18,6 @@ layers you can use independently:
 - **Cloud API** (`sonosify.cloud`): OAuth2 and async access to the Sonos Control
   API, including Audio Clips with automatic ducking. It is part of the main
   package and adds no separate install extra.
-- **CLI** (`sonosify` command, via the `cli` extra): a scriptable, JSON-first
-  command-line interface designed to be driven by humans and automation/agents
-  alike.
 
 Runnable scripts covering discovery, playback, volume, queue, groups, favorites,
 playback modes, and live events are in [`examples/`](examples/).
@@ -30,24 +27,15 @@ playback modes, and live events are in [`examples/`](examples/).
 Requires **Python 3.13 or 3.14**. Sonos speakers must be reachable on the same
 local network (SSDP discovery uses UDP multicast).
 
-Core library only:
-
 ```powershell
 uv add sonosify
 # or: pip install sonosify
 ```
 
-With the CLI (adds Typer + Rich):
-
-```powershell
-uv add "sonosify[cli]"
-# or: pip install "sonosify[cli]"
-```
-
 From a local checkout of this repository:
 
 ```powershell
-uv pip install -e ".[cli]"
+uv pip install -e .
 ```
 
 Setting up a development environment (dependency groups, tests, linting,
@@ -95,6 +83,40 @@ async def main():
 
 asyncio.run(main())
 ```
+
+### Local audio clips
+
+Audio clips can also use the player's local Control API WebSocket, without
+OAuth or a round trip through the Sonos cloud. Discovery is required because
+the command targets the speaker's immutable player ID:
+
+```python
+import asyncio
+
+from sonosify import ClipPriority, ClipType, SonosController
+
+
+async def main():
+    sonos = SonosController()
+    async with await sonos.client("Kitchen") as kitchen:
+        clip = await kitchen.play_audio_clip(
+            "http://192.168.1.50:8000/tts/response.mp3",
+            app_id="com.example.voice-agent",
+            name="Agent Voice",
+            volume=30,
+            priority=ClipPriority.HIGH,
+            clip_type=ClipType.VOICE_ASSISTANT,
+        )
+        print(clip.id)
+
+
+asyncio.run(main())
+```
+
+The player must expose the `AUDIO_CLIP` capability, and it must be able to
+fetch the supplied HTTP(S) URL itself. `cancel_audio_clip(clip.id)` cancels a
+scheduled or active clip. The current implementation opens one WebSocket per
+command; connection reuse can be added later without changing these methods.
 
 ## Setting up cloud credentials
 
@@ -196,31 +218,10 @@ Specialized cache handlers and errors remain available from their named
 OAuth scope values, settings implementation, and cache-path selection, are
 private.
 
-### Cloud CLI configuration
-
-The `cloud` command group is always present when the CLI is installed:
-
-```powershell
-# Interactive onboarding wizard: prints the URL to open, prompts for the
-# redirect URL (or bare code) once you're back, and saves the token. Run
-# again later and it recognizes an existing session, offering to keep,
-# refresh, or remove it.
-sonosify cloud login
-sonosify cloud logout
-
-sonosify cloud households
-sonosify cloud groups
-sonosify cloud players
-sonosify cloud clip "http://192.168.1.50:8000/tts/response.mp3" --player Kitchen --voice --volume 30
-sonosify cloud pause --group Kitchen
-sonosify cloud play --group Kitchen
-```
-
 `SONOSIFY_CLOUD_ACCESS_TOKEN` can replace the login/token-cache flow for
 short-lived automation. The client secret is never written to the token cache
 and must remain available whenever an expired token needs refreshing. Missing
-configuration produces a typed `CloudConfigurationError`; JSON CLI output
-includes a `missing` list and never includes credentials or tokens.
+configuration produces a typed `CloudConfigurationError`.
 
 `SonosClient` covers transport control (`play`, `pause`, `stop`, `next`,
 `previous`, `seek`), volume/mute (`get_volume`, `set_volume`, `adjust_volume`,
@@ -265,6 +266,7 @@ uv run python examples/discover.py
 uv run python examples/now_playing.py Kitchen
 uv run python examples/watch.py Kitchen
 uv run python examples/play_radio.py Kitchen https://example.com/live.mp3 "Example Radio"
+uv run python examples/local_audio_clip.py --volume 30  # uses SONOS_IP_ADDRESS
 uv run python examples/resume_playback.py Kitchen
 uv run python examples/volume.py Kitchen 25
 uv run python examples/favorites.py Kitchen
@@ -278,177 +280,10 @@ uv run python examples/playback_modes.py Kitchen shuffle on
 uv run python examples/playback_modes.py Kitchen sleep 0:30:00
 ```
 
-## Command-line interface
-
-Install the optional CLI dependencies (Typer + Rich) as shown above, then use
-the `sonosify` command:
-
-```powershell
-sonosify discover --format json
-sonosify status --room Kitchen --format json
-sonosify now-playing --room Kitchen
-sonosify play --room Kitchen
-sonosify pause --all
-sonosify next --room Kitchen
-sonosify previous --room Kitchen
-sonosify set-volume 25 --room Kitchen
-sonosify set-volume 20 --group "Living Room"
-sonosify volume-up Kitchen 10
-sonosify volume-down Kitchen 10
-sonosify mute --room Kitchen --on
-sonosify queue --room Kitchen
-sonosify queue jump 7 --room Kitchen
-sonosify queue remove 3 --room Kitchen
-sonosify queue clear --room Kitchen
-sonosify enqueue "x-rincon-mp3radio://example.com/live.mp3" --room Kitchen
-sonosify open "https://example.com/live.mp3" --radio --title "Example Radio" --room Kitchen
-sonosify track SPOTIFY_TRACK_ID --room Kitchen
-sonosify favorites list --room Kitchen
-sonosify favorites play "Jazz FM" --room Kitchen
-sonosify seek 1:30 --room Kitchen
-sonosify shuffle on --room Kitchen
-sonosify repeat all --room Kitchen
-sonosify crossfade on --room Kitchen
-sonosify sleep 30m --room Kitchen
-sonosify group "Living Room" --with Kitchen --with Office
-sonosify ungroup --room Kitchen
-sonosify groups --format json
-sonosify ping --room Kitchen --format json
-sonosify doctor --room Kitchen --format json
-sonosify watch --room Kitchen --count 5 --format json
-sonosify cloud players --format json
-sonosify cloud clip "http://192.168.1.50:8000/tts/response.mp3" --player Kitchen
-sonosify commands --format json
-sonosify --version --format json
-```
-
-### Targeting a speaker
-
-Every speaker command accepts `--room/-r` and `--ip`. Existing positional room
-arguments remain available for compatibility. `--ip` opens the device directly and
-does not perform SSDP discovery. A successful `discover` refreshes the persistent
-room-to-IP cache; exact room names use that cache and fall back to discovery on a
-cache miss.
-
-### Default speaker
-
-Set a default speaker once and omit the room name from then on:
-
-```powershell
-sonosify config set --room Kitchen      # or: sonosify config set --ip 192.168.1.42
-sonosify config show                    # show current defaults
-sonosify config clear                   # remove defaults
-
-sonosify play                           # now targets Kitchen automatically
-sonosify volume 25                      # set Kitchen to 25
-sonosify volume-up
-```
-
-An explicit room name or `--ip` on a command always overrides the configured default.
-The config is stored as JSON in your platform's app-config directory.
-
-The same defaults can be supplied without writing a file:
-
-```powershell
-$env:SONOSIFY_ROOM = "Kitchen"
-$env:SONOSIFY_IP = "192.168.1.42"
-$env:SONOSIFY_FORMAT = "json"
-$env:SONOSIFY_TIMEOUT = "5"
-$env:SONOSIFY_DEBUG = "1"
-```
-
-Precedence is command-line flag, then environment, then config file.
-
-### Output format
-
-Use `--format` before or after a command:
-
-```powershell
-sonosify --format json discover         # JSON speaker-list envelope
-sonosify --format tsv queue --room Kitchen  # tab-separated rows
-sonosify status --format json            # JSON object
-```
-
-`plain` (the default) renders rich tables and colored text for interactive use.
-Machine-readable stdout contains only result data. Diagnostics and debug traces go
-to stderr.
-
-JSON output has `schema_version: 1`. Object/action commands add their fields beside
-it. List commands use this stable envelope:
-
-```json
-{"schema_version": 1, "items": [{"room": "Kitchen", "ip": "192.168.1.42"}]}
-```
-
-`now-playing` and `status` include numeric `position_s` and `duration_s`.
-`status` combines playback state, volume, mute state, track, group identifier, and
-timing in one call.
-
-`watch --format json` emits one object per line (NDJSON). It can terminate itself
-with `--count N`, `--duration 10s`, or `--until PLAYING`.
-
-### Errors and exit codes
-
-In JSON mode, failures are emitted as a JSON object on stderr while stdout remains
-empty:
-
-```json
-{"schema_version": 1, "error": "no speaker matching 'Kitcen'", "code": "speaker_not_found", "query": "Kitcen"}
-```
-
-Stable exit codes are:
-
-| Exit | Meaning |
-|------|---------|
-| `0` | Success |
-| `1` | Other sonosify error |
-| `2` | Speaker not found |
-| `3` | Ambiguous speaker (`matches` is included in JSON) |
-| `4` | Discovery or network failure / timeout |
-| `5` | Sonos UPnP error (`upnp_code` and `description` are included) |
-
-### Favorites and media
-
-`favorites list` lists the Sonos favorites configured for a speaker's household;
-`favorites play NAME` plays one by exact title or unique substring match (an
-ambiguous match is rejected with the candidate titles listed). `open URL` starts
-playback of an arbitrary stream URL or Sonos-playable URI (`--radio`/`--title` set
-radio metadata for plain stream URLs), and `track TRACK_ID` plays a track by id,
-URI, or URL from an already-linked music service (`--next` enqueues as the
-next track, `--enqueue` only enqueues without starting playback).
-
-### Queue, groups, and playback modes
-
-Queue management is available through `queue` (show), `enqueue`, `queue clear`,
-`queue remove POSITION`, and `queue jump POSITION`. `group`, `ungroup`, and
-`groups` expose multi-room grouping. Playback automation includes in-track
-`seek`, `shuffle`, `repeat`, `crossfade`, and the `sleep` timer.
-
-The legacy overloaded `volume` command remains available. Agents should prefer the
-unambiguous `get-volume` and `set-volume` commands.
-
-Use `sonosify commands --format json` for recursive command/parameter
-introspection and `sonosify --version --format json` for feature detection.
-`sonosify doctor` runs a basic connectivity and service health check on a
-speaker (round-trip latency plus a live volume read), separate from the plain
-reachability check of `ping`.
-
-### Debugging
-
-Add `--debug` to print the underlying SOAP request/response
-traces to stderr:
-
-```powershell
-sonosify --debug volume Kitchen
-```
-
-Playback of `track` and `open` works when the corresponding music service is
-already linked on your Sonos household.
-
-Exports are collected in `sonosify.__init__` for library consumers. The agent CLI
-work also adds `RepeatMode`, `NetworkError`, `SonosClient.seek`,
-`get_play_mode`/`set_play_mode`, `set_shuffle`, `set_repeat`,
-`get_crossfade`/`set_crossfade`, and `configure_sleep_timer` to the Python API.
+Exports are collected in `sonosify.__init__` for library consumers, including
+`RepeatMode`, `NetworkError`, `SonosClient.seek`, `get_play_mode`/`set_play_mode`,
+`set_shuffle`/`set_repeat`, `get_crossfade`/`set_crossfade`, and
+`configure_sleep_timer`.
 
 ## Contributing
 
