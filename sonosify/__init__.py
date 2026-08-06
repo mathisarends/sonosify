@@ -1,5 +1,5 @@
 from .audio_clip import AudioClip, ClipLEDBehavior, ClipPriority, ClipType
-from .client import RepeatMode, SonosClient
+from .client import SonosClient
 from .controller import SonosController
 from .discovery import discover
 from .errors import (
@@ -38,7 +38,6 @@ __all__ = (
     "NetworkError",
     "PlaybackState",
     "RenderingControlEvent",
-    "RepeatMode",
     "SonosClient",
     "SonosController",
     "SonosEvent",

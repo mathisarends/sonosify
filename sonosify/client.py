@@ -37,50 +37,6 @@ _DEVICE_PROPERTIES = "urn:schemas-upnp-org:service:DeviceProperties:1"
 _ZONE_GROUP_TOPOLOGY = "urn:schemas-upnp-org:service:ZoneGroupTopology:1"
 
 
-class RepeatMode(StrEnum):
-    OFF = "off"
-    ONE = "one"
-    ALL = "all"
-
-
-class _TransportInfo(BaseModel):
-    """Typed view of the AVTransport GetTransportInfo response."""
-
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-
-    state: TransportState | None = Field(None, alias="CurrentTransportState")
-    status: str = Field("", alias="CurrentTransportStatus")
-    speed: str = Field("", alias="CurrentSpeed")
-
-    @field_validator("state", mode="before")
-    @classmethod
-    def _coerce_state(cls, value: object) -> object:
-        if not isinstance(value, str):
-            return value
-        try:
-            return TransportState(value)
-        except ValueError:
-            return None
-
-
-class _PositionInfo(BaseModel):
-    """Typed view of the AVTransport GetPositionInfo response."""
-
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-
-    track: int | None = Field(None, alias="Track")
-    track_uri: str = Field("", alias="TrackURI")
-    track_duration: str = Field("", alias="TrackDuration")
-    track_metadata: str = Field("", alias="TrackMetaData")
-    relative_time: str = Field("", alias="RelTime")
-    absolute_time: str = Field("", alias="AbsTime")
-
-    @field_validator("track", mode="before")
-    @classmethod
-    def _coerce_track(cls, value: object) -> object:
-        return int_or_none(value) if isinstance(value, str) else value
-
-
 class SonosClient:
     def __init__(
         self,
@@ -124,7 +80,7 @@ class SonosClient:
         if self._owns_client:
             await self._http.aclose()
 
-    async def __aenter__(self) -> SonosClient:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -257,8 +213,8 @@ class SonosClient:
         await self.set_play_mode(mode)
         return mode
 
-    async def set_repeat(self, repeat: RepeatMode | str) -> str:
-        repeat = RepeatMode(repeat)
+    async def set_repeat(self, repeat: _RepeatMode | str) -> str:
+        repeat = _RepeatMode(repeat)
         current = await self.get_play_mode()
         mode = _play_mode(current.startswith("SHUFFLE"), repeat)
         await self.set_play_mode(mode)
@@ -544,23 +500,67 @@ class SonosClient:
         raise ValueError("line-in playback requires a source Speaker or RINCON uid")
 
 
-def _repeat_from_play_mode(mode: str) -> RepeatMode:
+class _RepeatMode(StrEnum):
+    OFF = "off"
+    ONE = "one"
+    ALL = "all"
+
+
+class _TransportInfo(BaseModel):
+    """Typed view of the AVTransport GetTransportInfo response."""
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    state: TransportState | None = Field(None, alias="CurrentTransportState")
+    status: str = Field("", alias="CurrentTransportStatus")
+    speed: str = Field("", alias="CurrentSpeed")
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def _coerce_state(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        try:
+            return TransportState(value)
+        except ValueError:
+            return None
+
+
+class _PositionInfo(BaseModel):
+    """Typed view of the AVTransport GetPositionInfo response."""
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    track: int | None = Field(None, alias="Track")
+    track_uri: str = Field("", alias="TrackURI")
+    track_duration: str = Field("", alias="TrackDuration")
+    track_metadata: str = Field("", alias="TrackMetaData")
+    relative_time: str = Field("", alias="RelTime")
+    absolute_time: str = Field("", alias="AbsTime")
+
+    @field_validator("track", mode="before")
+    @classmethod
+    def _coerce_track(cls, value: object) -> object:
+        return int_or_none(value) if isinstance(value, str) else value
+
+
+def _repeat_from_play_mode(mode: str) -> _RepeatMode:
     if mode.endswith("REPEAT_ONE"):
-        return RepeatMode.ONE
+        return _RepeatMode.ONE
     if mode in {"REPEAT_ALL", "SHUFFLE"}:
-        return RepeatMode.ALL
-    return RepeatMode.OFF
+        return _RepeatMode.ALL
+    return _RepeatMode.OFF
 
 
-def _play_mode(shuffle: bool, repeat: RepeatMode) -> str:
+def _play_mode(shuffle: bool, repeat: _RepeatMode) -> str:
     if shuffle:
         return {
-            RepeatMode.OFF: "SHUFFLE_NOREPEAT",
-            RepeatMode.ONE: "SHUFFLE_REPEAT_ONE",
-            RepeatMode.ALL: "SHUFFLE",
+            _RepeatMode.OFF: "SHUFFLE_NOREPEAT",
+            _RepeatMode.ONE: "SHUFFLE_REPEAT_ONE",
+            _RepeatMode.ALL: "SHUFFLE",
         }[repeat]
     return {
-        RepeatMode.OFF: "NORMAL",
-        RepeatMode.ONE: "REPEAT_ONE",
-        RepeatMode.ALL: "REPEAT_ALL",
+        _RepeatMode.OFF: "NORMAL",
+        _RepeatMode.ONE: "REPEAT_ONE",
+        _RepeatMode.ALL: "REPEAT_ALL",
     }[repeat]
