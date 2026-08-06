@@ -4,8 +4,6 @@ from sonosify.models import Group, Speaker
 
 
 class SonosSystem:
-    __slots__ = ("_groups", "_speakers", "_timeout")
-
     def __init__(
         self,
         speakers: tuple[Speaker, ...],

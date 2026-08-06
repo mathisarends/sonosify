@@ -17,20 +17,6 @@ _RENDERING_CONTROL_EVENT_PATH = "/MediaRenderer/RenderingControl/Event"
 
 
 class EventSubscription:
-    __slots__ = (
-        "_callback_host",
-        "_callback_paths",
-        "_callback_port",
-        "_events",
-        "_http",
-        "_ip",
-        "_port",
-        "_server",
-        "_services",
-        "_subscriptions",
-        "_timeout_seconds",
-    )
-
     def __init__(
         self,
         ip: str,

@@ -30,8 +30,6 @@ class NetworkError(SonosifyError):
 
 
 class LocalAPIError(SonosifyError):
-    __slots__ = ("_response",)
-
     def __init__(
         self, message: str, *, response: dict[str, object] | None = None
     ) -> None:
@@ -62,8 +60,6 @@ class LocalAPIError(SonosifyError):
 
 
 class SpeakerNotFoundError(SonosifyError):
-    __slots__ = ("_query",)
-
     def __init__(self, message: str, *, query: str | None = None) -> None:
         self._query = query
         super().__init__(message)
@@ -81,8 +77,6 @@ class SpeakerNotFoundError(SonosifyError):
 
 
 class AmbiguousSpeakerError(SonosifyError):
-    __slots__ = ("_matches", "_query")
-
     def __init__(self, query: str, matches: Sequence[str]) -> None:
         self._query = query
         self._matches = tuple(matches)
@@ -108,8 +102,6 @@ class AmbiguousSpeakerError(SonosifyError):
 
 
 class UPnPError(SonosifyError):
-    __slots__ = ("_code", "_description")
-
     def __init__(self, code: str, description: str = "") -> None:
         self._code = code
         self._description = description

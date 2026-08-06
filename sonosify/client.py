@@ -83,8 +83,6 @@ class PositionInfo(BaseModel):
 
 
 class SonosClient:
-    __slots__ = ("_http", "_ip", "_owns_client", "_port", "_timeout", "_uid")
-
     def __init__(
         self,
         ip: str,

@@ -9,8 +9,6 @@ from sonosify.topology import SonosSystem
 
 
 class SonosController:
-    __slots__ = ("_discovery_timeout", "_include_invisible", "_system", "_timeout")
-
     def __init__(
         self,
         *,
