@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import ssl
+from collections.abc import Mapping
 from typing import Any
 
 import pytest
@@ -242,7 +243,7 @@ def test_websocket_transport_routes_audio_clip_status_events(
 
     monkeypatch.setattr(websocket_module, "connect", connect)
 
-    async def run() -> dict[str, Any]:
+    async def run() -> Mapping[str, Any]:
         transport = AudioClipWebSocket("192.168.1.10", timeout=3.0)
         await transport.subscribe_audio_clips("RINCON_1")
         await transport.send_command({"command": "loadAudioClip"})
@@ -261,6 +262,27 @@ def test_websocket_transport_routes_audio_clip_status_events(
     assert json.loads(connection.sent[0])[0]["command"] == "subscribe"
 
 
+def test_websocket_transport_subscribes_to_audio_clips_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _Connection('[{"success": true}, {}]')
+
+    async def connect(*args: object, **kwargs: object) -> _Connection:
+        return connection
+
+    monkeypatch.setattr(websocket_module, "connect", connect)
+
+    async def run() -> None:
+        transport = AudioClipWebSocket("192.168.1.10", timeout=3.0)
+        await transport.subscribe_audio_clips("RINCON_1")
+        await transport.subscribe_audio_clips("RINCON_1")
+        await transport.close()
+
+    asyncio.run(run())
+
+    assert len(connection.sent) == 1
+
+
 def test_websocket_transport_accepts_event_before_command_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -276,7 +298,7 @@ def test_websocket_transport_accepts_event_before_command_response(
 
     monkeypatch.setattr(websocket_module, "connect", connect)
 
-    async def run() -> tuple[dict[str, Any], dict[str, Any]]:
+    async def run() -> tuple[dict[str, Any], Mapping[str, Any]]:
         transport = AudioClipWebSocket("192.168.1.10", timeout=3.0)
         response = await transport.send_command({"command": "loadAudioClip"})
         event = await transport.wait_for_audio_clip("clip-1", timeout=1.0)

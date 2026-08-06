@@ -411,6 +411,41 @@ def test_local_audio_clip_resolves_player_id_from_configured_ip(
     assert command["playerId"] == "RINCON_DIRECT"
 
 
+def test_player_id_is_fetched_once_and_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    identity_requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal identity_requests
+        identity_requests += 1
+        return httpx.Response(
+            200,
+            text=(
+                '<root xmlns="urn:schemas-upnp-org:device-1-0"><device>'
+                "<UDN>uuid:RINCON_CACHED</UDN>"
+                "</device></root>"
+            ),
+        )
+
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
+        return {}
+
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket, "send_command", send_command
+    )
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = SonosClient("192.168.1.10", http_client=http)
+            await client.cancel_audio_clip("clip-1")
+            await client.cancel_audio_clip("clip-2")
+
+    asyncio.run(run())
+
+    assert identity_requests == 1
+
+
 def test_close_leaves_externally_provided_http_client_open() -> None:
     async def run() -> bool:
         http = httpx.AsyncClient()

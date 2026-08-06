@@ -134,7 +134,7 @@ class SonosClient:
         if http_authorization is not None:
             options["httpAuthorization"] = http_authorization
 
-        player_id = await self._player_id()
+        player_id = await self._get_or_fetch_player_id()
         result = await self._audio_clip_websocket.send_command(
             {
                 "namespace": "audioClip:1",
@@ -170,7 +170,7 @@ class SonosClient:
             http_authorization=None,
         )
 
-        player_id = await self._player_id()
+        player_id = await self._get_or_fetch_player_id()
         await self._audio_clip_websocket.subscribe_audio_clips(player_id)
         server = self._ensure_audio_clip_server()
         token, fetched = server.add(audio, content_type)
@@ -201,7 +201,7 @@ class SonosClient:
     async def cancel_audio_clip(self, clip_id: str) -> None:
         if not clip_id:
             raise ValueError("clip_id must not be empty")
-        player_id = await self._player_id()
+        player_id = await self._get_or_fetch_player_id()
         await self._audio_clip_websocket.send_command(
             {
                 "namespace": "audioClip:1",
@@ -211,7 +211,7 @@ class SonosClient:
             {"id": clip_id},
         )
 
-    async def _player_id(self) -> str:
+    async def _get_or_fetch_player_id(self) -> str:
         if self._uid:
             return self._uid
         try:
