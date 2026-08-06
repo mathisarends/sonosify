@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from enum import StrEnum
 from typing import Self
 from urllib.parse import urlparse
@@ -23,8 +24,12 @@ from sonosify.didl import (
     radio_uri,
 )
 from sonosify.errors import LocalAPIError, NetworkError
-from sonosify.events import EventService, EventSubscription, TransportState
-from sonosify.events.models import DEFAULT_SERVICES
+from sonosify.events import (
+    DEFAULT_SERVICES,
+    EventService,
+    EventSubscription,
+    TransportState,
+)
 from sonosify.models import Favorite, PlaybackState, Speaker, Track
 from sonosify.soap import soap_call
 
@@ -417,7 +422,7 @@ class SonosClient:
     def watch(
         self,
         *,
-        services: tuple[str | EventService, ...] = DEFAULT_SERVICES,
+        services: Sequence[str | EventService] = DEFAULT_SERVICES,
         callback_host: str | None = None,
         callback_port: int = 0,
         timeout_seconds: int = 300,

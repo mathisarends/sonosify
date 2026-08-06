@@ -101,6 +101,20 @@ class AmbiguousSpeakerError(SonosifyError):
         }
 
 
+class SubscriptionError(SonosifyError):
+    def __init__(self, message: str, *, services: Sequence[str] = ()) -> None:
+        self._services = tuple(services)
+        super().__init__(message)
+
+    @property
+    def services(self) -> tuple[str, ...]:
+        return self._services
+
+    @override
+    def error_details(self) -> dict[str, object]:
+        return {"code": "subscription_error", "services": list(self.services)}
+
+
 class UPnPError(SonosifyError):
     def __init__(self, code: str, description: str = "") -> None:
         self._code = code

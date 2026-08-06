@@ -1,10 +1,9 @@
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 
 from sonosify.client import DEFAULT_TIMEOUT, SonosClient
 from sonosify.discovery import _DEFAULT_DISCOVERY_TIMEOUT, discover
-from sonosify.events import EventService, EventSubscription
-from sonosify.events.models import DEFAULT_SERVICES
+from sonosify.events import DEFAULT_SERVICES, EventService, EventSubscription
 from sonosify.topology import SonosSystem
 
 
@@ -69,7 +68,7 @@ class SonosController:
         *,
         ip: str | None = None,
         coordinator: bool = True,
-        services: tuple[str | EventService, ...] = DEFAULT_SERVICES,
+        services: Sequence[str | EventService] = DEFAULT_SERVICES,
         callback_host: str | None = None,
         callback_port: int = 0,
         timeout_seconds: int = 300,

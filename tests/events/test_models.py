@@ -1,51 +1,108 @@
-from sonosify.events import EventService, TransportState
+import pytest
+
+from sonosify.events import (
+    ALL_SERVICES,
+    AlarmClockEvent,
+    AVTransportEvent,
+    EventService,
+    PlayMode,
+    RenderingControlEvent,
+    TransportState,
+    UnknownSonosEvent,
+)
 from sonosify.events.models import (
-    AVTransportValues,
-    RenderingControlValues,
+    event_path,
+    event_type,
     normalize_service,
+    require_service,
 )
 
 
-def test_av_transport_values_parse_aliases_and_coerce() -> None:
-    values = AVTransportValues.model_validate(
+def test_av_transport_event_parses_aliases_and_coerces() -> None:
+    event = AVTransportEvent.model_validate(
         {
             "TransportState": "PLAYING",
+            "CurrentPlayMode": "SHUFFLE",
+            "CurrentCrossfadeMode": "1",
             "CurrentTrack": "3",
-            "CurrentTrackURI": "x-sonos:1",
+            "NumberOfTracks": "12",
+            "CurrentTransportActions": "Play, Pause, Next",
         }
     )
 
-    assert values.transport_state is TransportState.PLAYING
-    assert values.current_track == 3
-    assert values.current_track_uri == "x-sonos:1"
+    assert event.transport_state is TransportState.PLAYING
+    assert event.play_mode is PlayMode.SHUFFLE
+    assert event.crossfade is True
+    assert event.current_track == 3
+    assert event.number_of_tracks == 12
+    assert event.transport_actions == ("Play", "Pause", "Next")
 
 
-def test_av_transport_values_lenient_on_garbage() -> None:
-    values = AVTransportValues.model_validate(
-        {"TransportState": "BOGUS", "CurrentTrack": "n/a"}
+def test_av_transport_event_is_lenient_on_garbage() -> None:
+    event = AVTransportEvent.model_validate(
+        {"TransportState": "BOGUS", "CurrentPlayMode": "BOGUS", "CurrentTrack": "n/a"}
     )
 
-    assert values.transport_state is None
-    assert values.current_track is None
+    assert event.transport_state is None
+    assert event.play_mode is None
+    assert event.current_track is None
 
 
-def test_rendering_control_values_coerce_volume_and_mute() -> None:
-    values = RenderingControlValues.model_validate({"Volume": "17", "Mute": "1"})
+def test_rendering_control_event_coerces_flags_and_signed_numbers() -> None:
+    event = RenderingControlEvent.model_validate(
+        {"Volume": "17", "Mute": "1", "Bass": "-5", "Loudness": "0", "NightMode": "x"}
+    )
 
-    assert values.volume == 17
-    assert values.muted is True
-    assert RenderingControlValues.model_validate({"Mute": "x"}).muted is None
-    assert RenderingControlValues.model_validate({"Mute": "0"}).muted is False
+    assert event.volume == 17
+    assert event.muted is True
+    assert event.bass == -5
+    assert event.loudness is False
+    assert event.night_mode is None
 
 
-def test_normalize_service_accepts_known_aliases() -> None:
-    assert normalize_service("av") is EventService.AV_TRANSPORT
+def test_events_keep_undeclared_variables_in_values() -> None:
+    values = {"Volume": "17", "SomeFutureVariable": "42"}
+
+    event = RenderingControlEvent.model_validate({**values, "values": values})
+
+    assert event.values == values
+
+
+def test_alarm_clock_event_defaults_service() -> None:
+    assert AlarmClockEvent().service is EventService.ALARM_CLOCK
+
+
+def test_normalize_service_accepts_punctuation_and_camel_case() -> None:
     assert normalize_service("AVTransport") is EventService.AV_TRANSPORT
+    assert normalize_service("av_transport") is EventService.AV_TRANSPORT
     assert normalize_service("rendering-control") is EventService.RENDERING_CONTROL
-    assert normalize_service(EventService.RENDERING_CONTROL) is (
-        EventService.RENDERING_CONTROL
-    )
+    assert normalize_service(EventService.QUEUE) is EventService.QUEUE
 
 
 def test_normalize_service_returns_none_for_unknown_service() -> None:
-    assert normalize_service("device_properties") is None
+    assert normalize_service("nonexistent") is None
+
+
+def test_require_service_rejects_unknown_service() -> None:
+    with pytest.raises(ValueError, match="unsupported event service"):
+        require_service("nonexistent")
+
+
+def test_event_type_falls_back_to_unknown_event() -> None:
+    assert event_type("nonexistent") is UnknownSonosEvent
+    assert event_type("ZoneGroupTopology").event_path == "/ZoneGroupTopology/Event"
+
+
+@pytest.mark.parametrize("service", ALL_SERVICES)
+def test_every_service_maps_to_a_distinct_typed_event(service: EventService) -> None:
+    model = event_type(service)
+
+    assert model is not UnknownSonosEvent
+    assert model().service is service
+    assert event_path(service).endswith("/Event")
+
+
+def test_all_services_have_unique_event_paths() -> None:
+    paths = [event_path(service) for service in ALL_SERVICES]
+
+    assert len(set(paths)) == len(paths)

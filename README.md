@@ -322,6 +322,9 @@ local HTTP callback server, subscribes the speaker to it, and yields parsed
 events — your OS firewall may ask whether Python can accept incoming
 connections.
 
+Register handlers with `on()` and let `run()` do the dispatching. Handlers are
+selected by event class, may be sync or async, and run in registration order:
+
 ```python
 import asyncio
 
@@ -331,15 +334,30 @@ from sonosify import AVTransportEvent, RenderingControlEvent, SonosController
 async def main():
     sonos = SonosController()
     async with sonos.watch("Kitchen") as watcher:
-        async for event in watcher:
-            match event:
-                case AVTransportEvent(transport_state=state, track=track):
-                    print(state, track.title if track else "")
-                case RenderingControlEvent(volume=volume, muted=muted):
-                    print(volume, muted)
+
+        @watcher.on(AVTransportEvent)
+        def transport(event):
+            print(event.transport_state, event.track.title if event.track else "")
+
+        @watcher.on(RenderingControlEvent)
+        async def rendering(event):
+            print(event.volume, event.muted)
+
+        await watcher.run()
 
 
 asyncio.run(main())
+```
+
+`@watcher.on(A, B)` registers one handler for several event classes, and
+`@watcher.on()` receives everything. The iterator form still works if you prefer
+`match` over handlers:
+
+```python
+async for event in watcher:
+    match event:
+        case AVTransportEvent(transport_state=state):
+            print(state)
 ```
 
 `SonosController.watch()` is the convenient form; `SonosClient.watch()` returns
@@ -348,24 +366,61 @@ the same `EventSubscription` for a client you already hold.
 | Member | Description |
 | --- | --- |
 | `async with subscription` | Starts the callback server and subscribes; unsubscribes and shuts down on exit |
+| `@subscription.on(*event_types)` | Registers a handler; no arguments means every event |
+| `await run()` | Starts if needed, then dispatches every incoming event to the handlers, indefinitely |
 | `async for event in subscription` | Yields events as they arrive, indefinitely |
 | `await next_event(timeout=None)` | Single event, optionally bounded by a timeout (raises `TimeoutError`) |
 | `events(*, timeout=None)` | Async iterator form of `next_event()` |
 | `await start()` / `await close()` | Manual lifecycle, if you are not using `async with` |
+| `services` / `subscribed_services` | The services you asked for, and the ones the player actually accepted |
 
-Event types, all frozen models carrying `service`, raw `values`, `sequence`, and
-`sid`:
+Subscriptions are renewed automatically at half their `timeout_seconds`, so a
+watcher keeps running past the player's subscription lifetime.
 
-| Type | Extra fields |
-| --- | --- |
-| `AVTransportEvent` | `transport_state: TransportState \| None`, `track: Track \| None` |
-| `RenderingControlEvent` | `volume: int \| None`, `muted: bool \| None` |
-| `UnknownSonosEvent` | Fallback for services that are not parsed into a typed model |
+No player implements every service — a speaker answers `SUBSCRIBE` on the
+soundbar-only `HTControl` with `503`. Those services are skipped and listed in
+`subscribed_services`; only if the player accepts nothing at all does `start()`
+raise `SubscriptionError`. That makes `services=ALL_SERVICES` safe on any model.
 
-`SonosEvent` is the union of the three. `EventService` selects which services to
-subscribe to (`AV_TRANSPORT`, `RENDERING_CONTROL`; both by default) and
-`TransportState` enumerates `PLAYING`, `PAUSED_PLAYBACK`, `STOPPED`,
-`TRANSITIONING`, and the remaining UPnP states.
+#### Event types
+
+Every service Sonos documents with evented state variables has its own frozen
+model. All of them carry `service`, the raw `values` dict, `sequence`, and `sid`;
+the typed fields below are the documented state variables of that service, and
+anything not modelled stays available in `values`. Every field is optional
+because a NOTIFY only carries the variables that actually changed.
+
+| `EventService` | Type | Typed fields include |
+| --- | --- | --- |
+| `AV_TRANSPORT` | `AVTransportEvent` | `transport_state`, `play_mode`, `crossfade`, `track`, `next_track`, `enqueued_track`, `number_of_tracks`, `transport_actions`, `alarm_running` |
+| `RENDERING_CONTROL` | `RenderingControlEvent` | `volume`, `muted`, `bass`, `treble`, `loudness`, `night_mode`, `dialog_level`, `sub_enabled`, `surround_enabled`, `trueplay_enabled` |
+| `GROUP_RENDERING_CONTROL` | `GroupRenderingControlEvent` | `group_volume`, `group_muted`, `group_volume_changeable` |
+| `QUEUE` | `QueueEvent` | `update_id`, `queue_owner_id`, `curated` |
+| `CONTENT_DIRECTORY` | `ContentDirectoryEvent` | `system_update_id`, `container_update_ids`, `favorites_update_id`, `share_index_in_progress` |
+| `ZONE_GROUP_TOPOLOGY` | `ZoneGroupTopologyEvent` | `zone_group_state`, `zone_group_id`, `zone_player_uuids_in_group`, `available_software_update` |
+| `DEVICE_PROPERTIES` | `DevicePropertiesEvent` | `zone_name`, `icon`, `invisible`, `orientation`, `mic_enabled`, `wifi_enabled`, `supports_audio_clip` |
+| `ALARM_CLOCK` | `AlarmClockEvent` | `alarm_list_version`, `time_zone`, `time_server`, `time_format` |
+| `AUDIO_IN` | `AudioInEvent` | `audio_input_name`, `line_in_connected`, `playing`, `left_line_in_level` |
+| `HT_CONTROL` | `HTControlEvent` | `ir_repeater_state`, `remote_configured`, `tos_link_connected` |
+| `GROUP_MANAGEMENT` | `GroupManagementEvent` | `group_coordinator_is_local`, `local_group_uuid`, `reset_volume_after` |
+| `MUSIC_SERVICES` | `MusicServicesEvent` | `service_list_version` |
+| `SYSTEM_PROPERTIES` | `SystemPropertiesEvent` | `customer_id`, `update_id`, `voice_update_id` |
+| `VIRTUAL_LINE_IN` | `VirtualLineInEvent` | `transport_state`, `current_track_uri` |
+| `RENDERER_CONNECTION_MANAGER` | `RendererConnectionManagerEvent` | `source_protocol_info`, `sink_protocol_info`, `current_connection_ids` |
+| `SERVER_CONNECTION_MANAGER` | `ServerConnectionManagerEvent` | same three, for the MediaServer side |
+| — | `UnknownSonosEvent` | Fallback for a service this library does not model |
+
+`SonosEvent` is the base class of all of them, so `@watcher.on(SonosEvent)`
+matches everything and `event.values` is always available. `DEFAULT_SERVICES`
+subscribes to `AV_TRANSPORT` and `RENDERING_CONTROL`; pass `ALL_SERVICES` to
+`watch(services=...)` for the full set. `TransportState` enumerates `PLAYING`,
+`PAUSED_PLAYBACK`, `STOPPED`, `TRANSITIONING`, and the remaining UPnP states;
+`PlayMode` enumerates `NORMAL`, `SHUFFLE`, `REPEAT_ALL`, and the rest.
+
+Values are coerced leniently: unknown enum members, non-numeric numbers, and
+malformed flags become `None` rather than raising. For stereo pairs, the typed
+field holds the `Master` channel and the other channels stay in `values` under
+`Volume:LF`-style keys.
 
 ### Data models
 
@@ -394,6 +449,7 @@ dictionary with a stable machine-readable `code`.
 | `AmbiguousSpeakerError` | A room name matches several speakers | `query`, `matches` |
 | `NetworkError` | A speaker was unreachable or the HTTP request failed | |
 | `UPnPError` | The speaker rejected a SOAP action | `code`, `description` |
+| `SubscriptionError` | The speaker accepted none of the requested event subscriptions | `services` |
 | `LocalAPIError` | The local WebSocket API returned an error (importable from `sonosify.errors`) | `response` |
 | `UnsupportedFeatureError` | The player does not support the requested feature | |
 
