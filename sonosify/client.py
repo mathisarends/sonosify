@@ -253,15 +253,15 @@ class SonosClient:
 
     async def set_shuffle(self, enabled: bool) -> str:
         current = await self.get_play_mode()
-        repeat = self._repeat_from_play_mode(current)
-        mode = self._play_mode(enabled, repeat)
+        repeat = _repeat_from_play_mode(current)
+        mode = _play_mode(enabled, repeat)
         await self.set_play_mode(mode)
         return mode
 
     async def set_repeat(self, repeat: RepeatMode | str) -> str:
         repeat = RepeatMode(repeat)
         current = await self.get_play_mode()
-        mode = self._play_mode(current.startswith("SHUFFLE"), repeat)
+        mode = _play_mode(current.startswith("SHUFFLE"), repeat)
         await self.set_play_mode(mode)
         return mode
 
@@ -558,24 +558,24 @@ class SonosClient:
             return self._uid
         raise ValueError("line-in playback requires a source Speaker or RINCON uid")
 
-    @staticmethod
-    def _repeat_from_play_mode(mode: str) -> RepeatMode:
-        if mode.endswith("REPEAT_ONE"):
-            return RepeatMode.ONE
-        if mode in {"REPEAT_ALL", "SHUFFLE"}:
-            return RepeatMode.ALL
-        return RepeatMode.OFF
 
-    @staticmethod
-    def _play_mode(shuffle: bool, repeat: RepeatMode) -> str:
-        if shuffle:
-            return {
-                RepeatMode.OFF: "SHUFFLE_NOREPEAT",
-                RepeatMode.ONE: "SHUFFLE_REPEAT_ONE",
-                RepeatMode.ALL: "SHUFFLE",
-            }[repeat]
+def _repeat_from_play_mode(mode: str) -> RepeatMode:
+    if mode.endswith("REPEAT_ONE"):
+        return RepeatMode.ONE
+    if mode in {"REPEAT_ALL", "SHUFFLE"}:
+        return RepeatMode.ALL
+    return RepeatMode.OFF
+
+
+def _play_mode(shuffle: bool, repeat: RepeatMode) -> str:
+    if shuffle:
         return {
-            RepeatMode.OFF: "NORMAL",
-            RepeatMode.ONE: "REPEAT_ONE",
-            RepeatMode.ALL: "REPEAT_ALL",
+            RepeatMode.OFF: "SHUFFLE_NOREPEAT",
+            RepeatMode.ONE: "SHUFFLE_REPEAT_ONE",
+            RepeatMode.ALL: "SHUFFLE",
         }[repeat]
+    return {
+        RepeatMode.OFF: "NORMAL",
+        RepeatMode.ONE: "REPEAT_ONE",
+        RepeatMode.ALL: "REPEAT_ALL",
+    }[repeat]
