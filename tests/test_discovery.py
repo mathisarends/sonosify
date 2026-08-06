@@ -76,7 +76,7 @@ def _install_fake_network(
     device_xml: dict[str, str],
     zone_group_state: str | None,
 ) -> None:
-    async def fake_ssdp_locations(timeout: float) -> set[str]:
+    def fake_ssdp_locations(timeout: float) -> set[str]:
         return locations
 
     def handler(method: str, url: str, body: str | None) -> httpx.Response:
@@ -191,3 +191,66 @@ def test_discover_excludes_invisible_speakers_by_default(
         "Kitchen",
         "Office",
     }
+
+
+def test_ssdp_searches_all_local_ipv4_interfaces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    addresses = ("192.168.178.71", "192.168.56.1")
+    responses = {
+        addresses[0]: b"HTTP/1.1 200 OK\r\nLOCATION: http://speaker/device.xml\r\n\r\n",
+        addresses[1]: b"HTTP/1.1 200 OK\r\n\r\n",
+    }
+
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.address = ""
+            self.closed = False
+
+        def bind(self, address: tuple[str, int]) -> None:
+            self.address = address[0]
+
+        def setsockopt(self, *args: object) -> None:
+            return None
+
+        def setblocking(self, value: bool) -> None:
+            assert value is False
+
+        def sendto(self, message: bytes, address: tuple[str, int]) -> None:
+            assert message == discovery_module._SSDP_SEARCH_MESSAGE
+            assert address == discovery_module._SSDP_ADDRESS
+
+        def recvfrom(self, size: int) -> tuple[bytes, tuple[str, int]]:
+            return responses[self.address], (self.address, 1900)
+
+        def close(self) -> None:
+            self.closed = True
+
+    sockets: list[FakeSocket] = []
+
+    def socket_factory(*args: object) -> FakeSocket:
+        sock = FakeSocket()
+        sockets.append(sock)
+        return sock
+
+    select_calls = 0
+
+    def fake_select(
+        readable: list[FakeSocket],
+        writable: list[FakeSocket],
+        exceptional: list[FakeSocket],
+        timeout: float,
+    ) -> tuple[list[FakeSocket], list[FakeSocket], list[FakeSocket]]:
+        nonlocal select_calls
+        select_calls += 1
+        return (readable if select_calls == 1 else []), [], []
+
+    monkeypatch.setattr(discovery_module, "_local_ipv4_addresses", lambda: addresses)
+    monkeypatch.setattr(discovery_module.socket, "socket", socket_factory)
+    monkeypatch.setattr(discovery_module.select, "select", fake_select)
+
+    locations = discovery_module._ssdp_locations(0.1)
+
+    assert locations == {"http://speaker/device.xml"}
+    assert [sock.address for sock in sockets] == list(addresses)
+    assert all(sock.closed for sock in sockets)

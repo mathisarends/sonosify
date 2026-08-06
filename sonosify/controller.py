@@ -2,7 +2,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from sonosify.client import DEFAULT_TIMEOUT, SonosClient
-from sonosify.discovery import DEFAULT_DISCOVERY_TIMEOUT, discover
+from sonosify.discovery import _DEFAULT_DISCOVERY_TIMEOUT, discover
 from sonosify.events import EventService, EventSubscription
 from sonosify.events.models import DEFAULT_SERVICES
 from sonosify.topology import SonosSystem
@@ -13,7 +13,7 @@ class SonosController:
         self,
         *,
         timeout: float = DEFAULT_TIMEOUT,
-        discovery_timeout: float = DEFAULT_DISCOVERY_TIMEOUT,
+        discovery_timeout: float = _DEFAULT_DISCOVERY_TIMEOUT,
         include_invisible: bool = False,
     ) -> None:
         self._timeout = timeout

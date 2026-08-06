@@ -1,5 +1,7 @@
 import asyncio
+import select
 import socket
+import time
 from collections.abc import Iterable
 from enum import StrEnum
 from urllib.parse import urlparse
@@ -13,16 +15,16 @@ from sonosify.errors import DiscoveryError
 from sonosify.models import Group, Speaker
 from sonosify.topology import SonosSystem
 
-DEFAULT_DISCOVERY_TIMEOUT = 2.0
+_DEFAULT_DISCOVERY_TIMEOUT = 2.0
 
 
 async def discover(
     *,
     timeout: float = DEFAULT_TIMEOUT,
-    discovery_timeout: float = DEFAULT_DISCOVERY_TIMEOUT,
+    discovery_timeout: float = _DEFAULT_DISCOVERY_TIMEOUT,
     include_invisible: bool = False,
 ) -> SonosSystem:
-    locations = await _ssdp_locations(discovery_timeout)
+    locations = await asyncio.to_thread(_ssdp_locations, discovery_timeout)
     if not locations:
         raise DiscoveryError("no Sonos speakers discovered via SSDP")
 
@@ -92,30 +94,61 @@ _SSDP_SEARCH_MESSAGE = "\r\n".join(
 ).encode()
 
 
-async def _ssdp_locations(timeout: float) -> set[str]:
-    # Non-blocking UDP multicast driven by the running loop, so a cancelled
-    # discover() tears the socket down immediately instead of leaving a thread
-    # to run out its timeout. We keep an explicit deadline because SSDP replies
-    # trickle in one datagram at a time until the window closes.
-    loop = asyncio.get_running_loop()
+def _ssdp_locations(timeout: float) -> set[str]:
+    # Windows commonly prefers a virtual adapter for multicast. Send from every
+    # local IPv4 address and use one deadline so extra adapters add no latency.
     locations: set[str] = set()
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as sock:
-        sock.setblocking(False)
-        await loop.sock_sendto(sock, _SSDP_SEARCH_MESSAGE, _SSDP_ADDRESS)
-
-        deadline = loop.time() + timeout
-        while (remaining := deadline - loop.time()) > 0:
+    sockets: list[socket.socket] = []
+    try:
+        for address in _local_ipv4_addresses() or ("0.0.0.0",):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             try:
-                data, _ = await asyncio.wait_for(
-                    loop.sock_recvfrom(sock, 65535), remaining
-                )
-            except TimeoutError:
+                sock.bind((address, 0))
+                if address != "0.0.0.0":
+                    sock.setsockopt(
+                        socket.IPPROTO_IP,
+                        socket.IP_MULTICAST_IF,
+                        socket.inet_aton(address),
+                    )
+                sock.setblocking(False)
+                sock.sendto(_SSDP_SEARCH_MESSAGE, _SSDP_ADDRESS)
+            except OSError:
+                sock.close()
+                continue
+            sockets.append(sock)
+
+        deadline = time.monotonic() + timeout
+        while sockets and (remaining := deadline - time.monotonic()) > 0:
+            readable, _, _ = select.select(sockets, [], [], remaining)
+            if not readable:
                 break
-            _, headers = parse_headers(data.decode(errors="ignore"))
-            location = headers.get("location")
-            if location:
-                locations.add(location)
+            for sock in readable:
+                try:
+                    data, _ = sock.recvfrom(65535)
+                except BlockingIOError:
+                    continue
+                _, headers = parse_headers(data.decode(errors="ignore"))
+                location = headers.get("location")
+                if location:
+                    locations.add(location)
+    finally:
+        for sock in sockets:
+            sock.close()
     return locations
+
+
+def _local_ipv4_addresses() -> tuple[str, ...]:
+    try:
+        candidates = socket.getaddrinfo(
+            socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM
+        )
+    except OSError:
+        return ()
+    return tuple(
+        dict.fromkeys(
+            address[0] for *_, address in candidates if address[0] != "127.0.0.1"
+        )
+    )
 
 
 async def _speakers_from_locations(
