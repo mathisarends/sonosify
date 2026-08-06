@@ -5,7 +5,7 @@ import pytest
 
 import sonosify.client as client_module
 from sonosify import Favorite, Speaker
-from sonosify.client import PositionInfo, SonosClient, TransportInfo
+from sonosify.client import SonosClient, _PositionInfo, _TransportInfo
 from sonosify.events import EventSubscription
 
 
@@ -485,7 +485,7 @@ def test_get_transport_info_parses_response(recorder: _RecordingSoap) -> None:
 
     info = _run(client.get_transport_info())
 
-    assert isinstance(info, TransportInfo)
+    assert isinstance(info, _TransportInfo)
     assert info.state is not None
     assert info.state.value == "PLAYING"
 
@@ -507,7 +507,7 @@ def test_get_position_info_coerces_track_number(recorder: _RecordingSoap) -> Non
 
     info = _run(client.get_position_info())
 
-    assert isinstance(info, PositionInfo)
+    assert isinstance(info, _PositionInfo)
     assert info.track == 3
     assert info.track_uri == "x-sonos:1"
 

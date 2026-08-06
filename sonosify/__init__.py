@@ -1,5 +1,5 @@
 from .audio_clip import AudioClip, ClipLEDBehavior, ClipPriority, ClipType
-from .client import PositionInfo, RepeatMode, SonosClient, TransportInfo
+from .client import RepeatMode, SonosClient
 from .controller import SonosController
 from .discovery import discover
 from .errors import (
@@ -37,7 +37,6 @@ __all__ = (
     "Group",
     "NetworkError",
     "PlaybackState",
-    "PositionInfo",
     "RenderingControlEvent",
     "RepeatMode",
     "SonosClient",
@@ -48,7 +47,6 @@ __all__ = (
     "Speaker",
     "SpeakerNotFoundError",
     "Track",
-    "TransportInfo",
     "TransportState",
     "UPnPError",
     "UnknownSonosEvent",

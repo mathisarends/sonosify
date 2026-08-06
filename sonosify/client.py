@@ -44,7 +44,7 @@ class RepeatMode(StrEnum):
     ALL = "all"
 
 
-class TransportInfo(BaseModel):
+class _TransportInfo(BaseModel):
     """Typed view of the AVTransport GetTransportInfo response."""
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
@@ -64,7 +64,7 @@ class TransportInfo(BaseModel):
             return None
 
 
-class PositionInfo(BaseModel):
+class _PositionInfo(BaseModel):
     """Typed view of the AVTransport GetPositionInfo response."""
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
@@ -390,13 +390,13 @@ class SonosClient:
         await self.set_mute(muted)
         return muted
 
-    async def get_transport_info(self) -> TransportInfo:
+    async def get_transport_info(self) -> _TransportInfo:
         result = await self.__av_transport("GetTransportInfo")
-        return TransportInfo.model_validate(result)
+        return _TransportInfo.model_validate(result)
 
-    async def get_position_info(self) -> PositionInfo:
+    async def get_position_info(self) -> _PositionInfo:
         result = await self.__av_transport("GetPositionInfo")
-        return PositionInfo.model_validate(result)
+        return _PositionInfo.model_validate(result)
 
     async def now_playing(self) -> PlaybackState:
         transport = await self.get_transport_info()
