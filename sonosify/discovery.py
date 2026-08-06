@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 import httpx
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from sonosify._parsing import local_name, parse_headers
 from sonosify.client import DEFAULT_TIMEOUT, SonosClient
@@ -70,13 +71,20 @@ class _ZoneTag(StrEnum):
     MEMBER = "ZoneGroupMember"
 
 
-class _ZoneAttr(StrEnum):
-    ID = "ID"
-    COORDINATOR = "Coordinator"
-    UUID = "UUID"
-    LOCATION = "Location"
-    ZONE_NAME = "ZoneName"
-    INVISIBLE = "Invisible"
+class _ZoneGroupAttributes(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    id: str = Field(alias="ID", min_length=1)
+    coordinator_uid: str = Field(alias="Coordinator", min_length=1)
+
+
+class _ZoneGroupMemberAttributes(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    uid: str = Field(alias="UUID", min_length=1)
+    location: str = Field(alias="Location", min_length=1)
+    zone_name: str = Field("", alias="ZoneName")
+    invisible: bool = Field(False, alias="Invisible")
 
 
 _SSDP_ADDRESS = ("239.255.255.250", 1900)
@@ -217,35 +225,39 @@ def _parse_topology(
 
     speakers: dict[str, Speaker] = {}
     groups: list[Group] = []
-    for zone_group in root.iter():
-        if local_name(zone_group.tag) != _ZoneTag.GROUP:
-            continue
-        group_id = zone_group.attrib.get(_ZoneAttr.ID, "")
-        coordinator_uid = zone_group.attrib.get(_ZoneAttr.COORDINATOR, "")
-        members: list[Speaker] = []
-        for member in list(zone_group):
-            if local_name(member.tag) != _ZoneTag.MEMBER:
+    try:
+        for zone_group in root.iter():
+            if local_name(zone_group.tag) != _ZoneTag.GROUP:
                 continue
-            uid = member.attrib.get(_ZoneAttr.UUID, "")
-            location = member.attrib.get(_ZoneAttr.LOCATION, "")
-            parsed = urlparse(location)
-            base = known.get(uid)
-            zone_name = member.attrib.get(_ZoneAttr.ZONE_NAME, "")
-            speaker = Speaker(
-                ip=parsed.hostname or (base.ip if base else ""),
-                port=parsed.port or (base.port if base else 1400),
-                room_name=zone_name or (base.room_name if base else ""),
-                uid=uid,
-                zone_name=zone_name,
-                coordinator_uid=coordinator_uid,
-                is_coordinator=uid == coordinator_uid,
-                invisible=member.attrib.get(_ZoneAttr.INVISIBLE, "0") == "1",
+            group_data = _ZoneGroupAttributes.model_validate(zone_group.attrib)
+            members: list[Speaker] = []
+            for member in list(zone_group):
+                if local_name(member.tag) != _ZoneTag.MEMBER:
+                    continue
+                member_data = _ZoneGroupMemberAttributes.model_validate(member.attrib)
+                parsed_location = urlparse(member_data.location)
+                base = known.get(member_data.uid)
+                speaker = Speaker(
+                    ip=parsed_location.hostname or (base.ip if base else ""),
+                    port=parsed_location.port or (base.port if base else 1400),
+                    room_name=member_data.zone_name or (base.room_name if base else ""),
+                    uid=member_data.uid,
+                    zone_name=member_data.zone_name,
+                    coordinator_uid=group_data.coordinator_uid,
+                    is_coordinator=member_data.uid == group_data.coordinator_uid,
+                    invisible=member_data.invisible,
+                )
+                speakers[member_data.uid] = speaker
+                members.append(speaker)
+            groups.append(
+                Group(
+                    id=group_data.id,
+                    coordinator_uid=group_data.coordinator_uid,
+                    members=tuple(members),
+                )
             )
-            speakers[uid or speaker.ip] = speaker
-            members.append(speaker)
-        groups.append(
-            Group(id=group_id, coordinator_uid=coordinator_uid, members=tuple(members))
-        )
+    except (ValidationError, ValueError):
+        return None
     return tuple(speakers.values()), tuple(groups)
 
 

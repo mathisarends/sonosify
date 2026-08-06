@@ -193,6 +193,27 @@ def test_discover_excludes_invisible_speakers_by_default(
     }
 
 
+@pytest.mark.parametrize(
+    "group_attributes, member_attributes",
+    [
+        ('ID="group-1"', 'UUID="speaker-1" Location="http://192.168.1.10:1400"'),
+        (
+            'ID="group-1" Coordinator="speaker-1"',
+            'Location="http://192.168.1.10:1400"',
+        ),
+    ],
+)
+def test_parse_topology_rejects_missing_required_attributes(
+    group_attributes: str, member_attributes: str
+) -> None:
+    state = (
+        f"<ZoneGroupState><ZoneGroup {group_attributes}>"
+        f"<ZoneGroupMember {member_attributes}/></ZoneGroup></ZoneGroupState>"
+    )
+
+    assert discovery_module._parse_topology(state, {}) is None
+
+
 def test_ssdp_searches_all_local_ipv4_interfaces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
