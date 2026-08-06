@@ -15,44 +15,6 @@ from sonosify.topology import SonosSystem
 
 DEFAULT_DISCOVERY_TIMEOUT = 2.0
 
-_UUID_PREFIX = "uuid:"
-
-
-class DeviceTag(StrEnum):
-    DEVICE = "device"
-    ROOM_NAME = "roomName"
-    FRIENDLY_NAME = "friendlyName"
-    UDN = "UDN"
-
-
-class ZoneTag(StrEnum):
-    GROUP = "ZoneGroup"
-    MEMBER = "ZoneGroupMember"
-
-
-class ZoneAttr(StrEnum):
-    ID = "ID"
-    COORDINATOR = "Coordinator"
-    UUID = "UUID"
-    LOCATION = "Location"
-    ZONE_NAME = "ZoneName"
-    INVISIBLE = "Invisible"
-
-
-_SSDP_ADDRESS = ("239.255.255.250", 1900)
-_SONOS_ST = "urn:schemas-upnp-org:device:ZonePlayer:1"
-_SSDP_SEARCH_MESSAGE = "\r\n".join(
-    [
-        "M-SEARCH * HTTP/1.1",
-        f"HOST: {_SSDP_ADDRESS[0]}:{_SSDP_ADDRESS[1]}",
-        'MAN: "ssdp:discover"',
-        "MX: 1",
-        f"ST: {_SONOS_ST}",
-        "",
-        "",
-    ]
-).encode()
-
 
 async def discover(
     *,
@@ -89,6 +51,45 @@ async def discover(
         )
 
     return SonosSystem(speakers, groups, timeout)
+
+
+_UUID_PREFIX = "uuid:"
+
+
+class _DeviceTag(StrEnum):
+    DEVICE = "device"
+    ROOM_NAME = "roomName"
+    FRIENDLY_NAME = "friendlyName"
+    UDN = "UDN"
+
+
+class _ZoneTag(StrEnum):
+    GROUP = "ZoneGroup"
+    MEMBER = "ZoneGroupMember"
+
+
+class _ZoneAttr(StrEnum):
+    ID = "ID"
+    COORDINATOR = "Coordinator"
+    UUID = "UUID"
+    LOCATION = "Location"
+    ZONE_NAME = "ZoneName"
+    INVISIBLE = "Invisible"
+
+
+_SSDP_ADDRESS = ("239.255.255.250", 1900)
+_SONOS_ST = "urn:schemas-upnp-org:device:ZonePlayer:1"
+_SSDP_SEARCH_MESSAGE = "\r\n".join(
+    [
+        "M-SEARCH * HTTP/1.1",
+        f"HOST: {_SSDP_ADDRESS[0]}:{_SSDP_ADDRESS[1]}",
+        'MAN: "ssdp:discover"',
+        "MX: 1",
+        f"ST: {_SONOS_ST}",
+        "",
+        "",
+    ]
+).encode()
 
 
 async def _ssdp_locations(timeout: float) -> set[str]:
@@ -143,11 +144,13 @@ async def _speaker_from_location(
 def _speaker_from_device_xml(location: str, xml_text: str) -> Speaker:
     parsed = urlparse(location)
     root = ElementTree.fromstring(xml_text)
-    device = _first(root, DeviceTag.DEVICE)
+    device = _first(root, _DeviceTag.DEVICE)
     if device is None:
         device = root
-    room = _text(device, DeviceTag.ROOM_NAME) or _text(device, DeviceTag.FRIENDLY_NAME)
-    uid = _text(device, DeviceTag.UDN).removeprefix(_UUID_PREFIX)
+    room = _text(device, _DeviceTag.ROOM_NAME) or _text(
+        device, _DeviceTag.FRIENDLY_NAME
+    )
+    uid = _text(device, _DeviceTag.UDN).removeprefix(_UUID_PREFIX)
     return Speaker(
         ip=parsed.hostname or "", port=parsed.port or 1400, room_name=room, uid=uid
     )
@@ -182,19 +185,19 @@ def _parse_topology(
     speakers: dict[str, Speaker] = {}
     groups: list[Group] = []
     for zone_group in root.iter():
-        if local_name(zone_group.tag) != ZoneTag.GROUP:
+        if local_name(zone_group.tag) != _ZoneTag.GROUP:
             continue
-        group_id = zone_group.attrib.get(ZoneAttr.ID, "")
-        coordinator_uid = zone_group.attrib.get(ZoneAttr.COORDINATOR, "")
+        group_id = zone_group.attrib.get(_ZoneAttr.ID, "")
+        coordinator_uid = zone_group.attrib.get(_ZoneAttr.COORDINATOR, "")
         members: list[Speaker] = []
         for member in list(zone_group):
-            if local_name(member.tag) != ZoneTag.MEMBER:
+            if local_name(member.tag) != _ZoneTag.MEMBER:
                 continue
-            uid = member.attrib.get(ZoneAttr.UUID, "")
-            location = member.attrib.get(ZoneAttr.LOCATION, "")
+            uid = member.attrib.get(_ZoneAttr.UUID, "")
+            location = member.attrib.get(_ZoneAttr.LOCATION, "")
             parsed = urlparse(location)
             base = known.get(uid)
-            zone_name = member.attrib.get(ZoneAttr.ZONE_NAME, "")
+            zone_name = member.attrib.get(_ZoneAttr.ZONE_NAME, "")
             speaker = Speaker(
                 ip=parsed.hostname or (base.ip if base else ""),
                 port=parsed.port or (base.port if base else 1400),
@@ -203,7 +206,7 @@ def _parse_topology(
                 zone_name=zone_name,
                 coordinator_uid=coordinator_uid,
                 is_coordinator=uid == coordinator_uid,
-                invisible=member.attrib.get(ZoneAttr.INVISIBLE, "0") == "1",
+                invisible=member.attrib.get(_ZoneAttr.INVISIBLE, "0") == "1",
             )
             speakers[uid or speaker.ip] = speaker
             members.append(speaker)
