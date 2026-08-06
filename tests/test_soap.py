@@ -133,3 +133,46 @@ def test_soap_call_translates_network_timeout() -> None:
 
     with pytest.raises(NetworkError, match="timed out"):
         asyncio.run(run())
+
+
+def test_soap_call_translates_other_request_errors() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    async def run() -> None:
+        async with _client(httpx.MockTransport(handler)) as client:
+            await soap_call(client, "http://host/Control", "urn:test", "Play")
+
+    with pytest.raises(NetworkError, match="failed"):
+        asyncio.run(run())
+
+
+def test_soap_call_returns_empty_dict_for_non_ok_success_status() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(204)
+
+    async def run() -> dict[str, str]:
+        async with _client(httpx.MockTransport(handler)) as client:
+            return await soap_call(client, "http://host/Control", "urn:test", "Play")
+
+    assert asyncio.run(run()) == {}
+
+
+def test_soap_call_raises_http_error_when_upnp_error_has_no_details() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            text=(
+                '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+                "<s:Body><s:Fault><detail>"
+                '<UPnPError xmlns="urn:schemas-upnp-org:control-1-0"/>'
+                "</detail></s:Fault></s:Body></s:Envelope>"
+            ),
+        )
+
+    async def run() -> None:
+        async with _client(httpx.MockTransport(handler)) as client:
+            await soap_call(client, "http://host/Control", "urn:test", "Play")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(run())

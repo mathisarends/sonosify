@@ -133,6 +133,51 @@ def test_close_unsubscribes_all_services(fake_http: _FakeHttpClient) -> None:
     assert methods.count("UNSUBSCRIBE") == 2
 
 
+def test_callback_server_rejects_non_notify_methods(
+    fake_http: _FakeHttpClient,
+) -> None:
+    async def send_get(port: int) -> bytes:
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"GET /MediaRenderer/AVTransport/Event HTTP/1.1\r\n\r\n")
+        await writer.drain()
+        response = await reader.read()
+        writer.close()
+        await writer.wait_closed()
+        return response
+
+    async def run() -> bytes:
+        subscription = EventSubscription(
+            "192.168.1.10",
+            services=(EventService.AV_TRANSPORT,),
+            callback_host="127.0.0.1",
+        )
+        await subscription.start()
+        assert subscription.callback_host == "127.0.0.1"
+        try:
+            port = subscription._server.sockets[0].getsockname()[1]  # noqa: SLF001
+            return await send_get(port)
+        finally:
+            await subscription.close()
+
+    response = asyncio.run(run())
+
+    assert response.startswith(b"HTTP/1.1 405 Method Not Allowed")
+
+
+def test_callback_port_exposes_the_requested_port() -> None:
+    subscription = EventSubscription(
+        "192.168.1.10", services=(EventService.AV_TRANSPORT,), callback_port=12345
+    )
+
+    assert subscription.callback_port == 12345
+
+
+def test_local_ip_for_returns_outbound_interface_address() -> None:
+    local_ip = subscription_module._local_ip_for("8.8.8.8")
+
+    assert local_ip.count(".") == 3
+
+
 def test_notify_request_is_parsed_and_queued(fake_http: _FakeHttpClient) -> None:
     body = (
         b'<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">'

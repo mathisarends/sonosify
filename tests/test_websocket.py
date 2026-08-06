@@ -146,6 +146,60 @@ def test_websocket_transport_discards_failed_connection(
     assert recovered.close_calls == 1
 
 
+def test_websocket_transport_wraps_connect_failure_as_network_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def connect(*args: object, **kwargs: object) -> _Connection:
+        raise OSError("no route to host")
+
+    monkeypatch.setattr(websocket_module, "connect", connect)
+
+    async def run() -> None:
+        transport = AudioClipWebSocket("192.168.1.10", timeout=3.0)
+        with pytest.raises(NetworkError, match="connection failed"):
+            await transport.send_command({"command": "loadAudioClip"})
+
+    asyncio.run(run())
+
+
+def test_websocket_transport_rejects_invalid_json_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _Connection("not json")
+
+    async def connect(*args: object, **kwargs: object) -> _Connection:
+        return connection
+
+    monkeypatch.setattr(websocket_module, "connect", connect)
+
+    async def run() -> None:
+        transport = AudioClipWebSocket("192.168.1.10", timeout=3.0)
+        with pytest.raises(LocalAPIError, match="invalid WebSocket response"):
+            await transport.send_command({"command": "loadAudioClip"})
+        await transport.close()
+
+    asyncio.run(run())
+
+
+def test_websocket_transport_rejects_malformed_response_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _Connection('{"success": true}')
+
+    async def connect(*args: object, **kwargs: object) -> _Connection:
+        return connection
+
+    monkeypatch.setattr(websocket_module, "connect", connect)
+
+    async def run() -> None:
+        transport = AudioClipWebSocket("192.168.1.10", timeout=3.0)
+        with pytest.raises(LocalAPIError, match="invalid WebSocket response"):
+            await transport.send_command({"command": "loadAudioClip"})
+        await transport.close()
+
+    asyncio.run(run())
+
+
 def test_websocket_transport_preserves_sonos_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

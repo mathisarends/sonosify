@@ -6,6 +6,7 @@ import pytest
 import sonosify.client as client_module
 from sonosify import Favorite, Speaker
 from sonosify.client import PositionInfo, SonosClient, TransportInfo
+from sonosify.errors import LocalAPIError, NetworkError
 from sonosify.events import EventSubscription
 
 
@@ -130,6 +131,109 @@ def test_play_audio_clip_sends_local_control_api_command(
             {},
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"name": ""}, "audio clip name"),
+        ({"app_id": ""}, "app_id"),
+        ({"volume": 101}, "audio clip volume"),
+        ({"stream_url": "not-a-url"}, "stream_url must be an absolute"),
+        ({"http_authorization": "x" * 513}, "http_authorization"),
+    ],
+)
+def test_play_audio_clip_validates_arguments(
+    kwargs: dict[str, object], match: str
+) -> None:
+    client = SonosClient("192.168.1.10")
+    base_kwargs: dict[str, object] = {"app_id": "com.example.agent", "name": "Agent"}
+    base_kwargs.update(kwargs)
+
+    with pytest.raises(ValueError, match=match):
+        _run(client.play_audio_clip(**base_kwargs))
+
+
+def test_play_audio_clip_includes_http_authorization_option(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
+        calls.append((*args, kwargs))
+        return {"id": "clip-1", "name": "Agent", "appId": "com.example.agent"}
+
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket, "send_command", send_command
+    )
+    client = SonosClient("192.168.1.10", uid="RINCON_1")
+
+    _run(
+        client.play_audio_clip(
+            app_id="com.example.agent", name="Agent", http_authorization="Bearer x"
+        )
+    )
+
+    assert calls[0][1]["httpAuthorization"] == "Bearer x"
+
+
+def test_cancel_audio_clip_rejects_empty_clip_id() -> None:
+    client = SonosClient("192.168.1.10", uid="RINCON_1")
+
+    with pytest.raises(ValueError, match="clip_id must not be empty"):
+        _run(client.cancel_audio_clip(""))
+
+
+def test_player_id_wraps_http_errors_as_network_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = SonosClient("192.168.1.10", http_client=http)
+            with pytest.raises(NetworkError, match="cannot read Sonos device identity"):
+                await client.cancel_audio_clip("clip-1")
+
+    asyncio.run(run())
+
+
+def test_player_id_wraps_unparseable_xml_as_local_api_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="not xml")
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = SonosClient("192.168.1.10", http_client=http)
+            with pytest.raises(LocalAPIError, match="invalid device metadata"):
+                await client.cancel_audio_clip("clip-1")
+
+    asyncio.run(run())
+
+
+def test_player_id_raises_when_udn_missing() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text=(
+                '<root xmlns="urn:schemas-upnp-org:device-1-0"><device></device></root>'
+            ),
+        )
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = SonosClient("192.168.1.10", http_client=http)
+            with pytest.raises(LocalAPIError, match="contains no UDN"):
+                await client.cancel_audio_clip("clip-1")
+
+    asyncio.run(run())
+
+
+def test_transport_info_coerces_non_string_state_to_none() -> None:
+    info = TransportInfo.model_validate({"CurrentTransportState": None})
+
+    assert info.state is None
 
 
 def test_cancel_audio_clip_sends_clip_id(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,6 +375,32 @@ def test_shuffle_and_repeat_preserve_each_other(recorder: _RecordingSoap) -> Non
         "SHUFFLE_REPEAT_ONE",
         "SHUFFLE_NOREPEAT",
     ]
+
+
+def test_set_repeat_without_shuffle_uses_non_shuffled_play_modes(
+    recorder: _RecordingSoap,
+) -> None:
+    recorder._responses["GetTransportSettings"] = {"PlayMode": "NORMAL"}
+    client = SonosClient("192.168.1.10")
+
+    assert _run(client.set_repeat("one")) == "REPEAT_ONE"
+
+
+@pytest.mark.parametrize(
+    ("current_play_mode", "expected_mode"),
+    [
+        ("REPEAT_ALL", "SHUFFLE"),
+        ("SHUFFLE", "SHUFFLE"),
+        ("NORMAL", "SHUFFLE_NOREPEAT"),
+    ],
+)
+def test_set_shuffle_maps_every_current_repeat_state(
+    recorder: _RecordingSoap, current_play_mode: str, expected_mode: str
+) -> None:
+    recorder._responses["GetTransportSettings"] = {"PlayMode": current_play_mode}
+    client = SonosClient("192.168.1.10")
+
+    assert _run(client.set_shuffle(True)) == expected_mode
 
 
 def test_crossfade_get_and_set(recorder: _RecordingSoap) -> None:

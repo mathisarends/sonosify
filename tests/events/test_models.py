@@ -1,5 +1,6 @@
 import pytest
 
+import sonosify.events.models as events_models
 from sonosify.events import (
     ALL_SERVICES,
     AlarmClockEvent,
@@ -58,6 +59,17 @@ def test_rendering_control_event_coerces_flags_and_signed_numbers() -> None:
     assert event.bass == -5
     assert event.loudness is False
     assert event.night_mode is None
+
+
+def test_flag_csv_and_enum_coercers_pass_through_non_string_values() -> None:
+    # These BeforeValidators only parse raw SOAP string payloads; pydantic
+    # itself may pass through an already-correct type (e.g. a default), which
+    # must be returned untouched rather than mis-parsed as a string.
+    assert events_models._flag(True) is True
+    assert events_models._csv(("a", "b")) == ("a", "b")
+
+    coerce_state = events_models._enum_or_none(TransportState).func
+    assert coerce_state(None) is None
 
 
 def test_events_keep_undeclared_variables_in_values() -> None:
