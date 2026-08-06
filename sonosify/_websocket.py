@@ -17,6 +17,8 @@ from sonosify.errors import LocalAPIError, NetworkError
 # This recognizable UUID-shaped placeholder is not a credential or secret.
 _API_KEY = "123e4567-e89b-12d3-a456-426655440000"
 _SUBPROTOCOL = Subprotocol("v1.api.smartspeaker.audio")
+_TERMINAL_CLIP_STATES = {"DISMISSED", "DONE", "ERROR", "INTERRUPTED"}
+_MAX_CACHED_CLIP_STATES = 128
 
 
 class AudioClipWebSocket:
@@ -24,7 +26,12 @@ class AudioClipWebSocket:
         self._ip = ip
         self._timeout = timeout
         self._connection: ClientConnection | None = None
+        self._reader_task: asyncio.Task[None] | None = None
+        self._pending_response: asyncio.Future[dict[str, Any]] | None = None
         self._command_lock = asyncio.Lock()
+        self._subscribed_players: set[str] = set()
+        self._clip_states: dict[str, dict[str, Any]] = {}
+        self._clip_waiters: dict[str, set[asyncio.Future[dict[str, Any]]]] = {}
 
     async def send_command(
         self,
@@ -35,17 +42,60 @@ class AudioClipWebSocket:
 
         async with self._command_lock:
             connection = await self._open()
+            loop = asyncio.get_running_loop()
+            response = loop.create_future()
+            self._pending_response = response
             try:
                 async with asyncio.timeout(self._timeout):
                     await connection.send(payload)
-                    raw_response = await connection.recv()
+                    return await response
             except (OSError, TimeoutError, WebSocketException) as exc:
                 await self._discard()
                 raise NetworkError(
                     f"local Sonos WebSocket request failed: {exc}"
                 ) from exc
+            finally:
+                if self._pending_response is response:
+                    self._pending_response = None
 
-        return _parse_response(raw_response)
+    async def subscribe_audio_clips(self, player_id: str) -> None:
+        if player_id in self._subscribed_players:
+            return
+        await self.send_command(
+            {
+                "namespace": "audioClip:1",
+                "command": "subscribe",
+                "playerId": player_id,
+            }
+        )
+        self._subscribed_players.add(player_id)
+
+    async def wait_for_audio_clip(
+        self, clip_id: str, *, timeout: float | None = None
+    ) -> dict[str, Any]:
+        async with asyncio.timeout(timeout):
+            while True:
+                current = self._clip_states.get(clip_id)
+                if (
+                    current is not None
+                    and current.get("status") in _TERMINAL_CLIP_STATES
+                ):
+                    return current
+
+                waiter: asyncio.Future[dict[str, Any]] = (
+                    asyncio.get_running_loop().create_future()
+                )
+                self._clip_waiters.setdefault(clip_id, set()).add(waiter)
+                try:
+                    update = await waiter
+                finally:
+                    waiters = self._clip_waiters.get(clip_id)
+                    if waiters is not None:
+                        waiters.discard(waiter)
+                        if not waiters:
+                            self._clip_waiters.pop(clip_id, None)
+                if update.get("status") in _TERMINAL_CLIP_STATES:
+                    return update
 
     async def close(self) -> None:
         async with self._command_lock:
@@ -66,7 +116,7 @@ class AudioClipWebSocket:
         ssl_context.verify_mode = ssl.CERT_NONE
 
         try:
-            self._connection = await connect(
+            connection = await connect(
                 uri,
                 additional_headers={"X-Sonos-Api-Key": _API_KEY},
                 subprotocols=[_SUBPROTOCOL],
@@ -80,27 +130,87 @@ class AudioClipWebSocket:
             raise NetworkError(
                 f"local Sonos WebSocket connection failed: {exc}"
             ) from exc
-        return self._connection
+
+        self._connection = connection
+        self._reader_task = asyncio.create_task(self._read_messages(connection))
+        return connection
+
+    async def _read_messages(self, connection: ClientConnection) -> None:
+        error: Exception | None = None
+        try:
+            while True:
+                header, body = _parse_message(await connection.recv())
+                if "success" in header:
+                    self._resolve_response(header, body)
+                else:
+                    self._dispatch_event(header, body)
+        except asyncio.CancelledError:
+            raise
+        except (OSError, WebSocketException) as exc:
+            error = NetworkError(f"local Sonos WebSocket connection lost: {exc}")
+        except Exception as exc:
+            error = exc
+        finally:
+            if self._connection is connection:
+                self._connection = None
+                self._subscribed_players.clear()
+            if error is not None:
+                self._fail_pending(error)
+
+    def _resolve_response(self, header: dict[str, Any], body: dict[str, Any]) -> None:
+        response = self._pending_response
+        if response is None or response.done():
+            return
+        if header.get("success", False):
+            response.set_result(body)
+        else:
+            response.set_exception(LocalAPIError.from_response(header, body))
+
+    def _dispatch_event(self, header: dict[str, Any], body: dict[str, Any]) -> None:
+        if header.get("type") != "audioClipStatus":
+            return
+        clips = body.get("audioClips")
+        if not isinstance(clips, list):
+            return
+        for value in clips:
+            if not isinstance(value, dict) or not isinstance(value.get("id"), str):
+                continue
+            clip_id = value["id"]
+            self._clip_states[clip_id] = value
+            if len(self._clip_states) > _MAX_CACHED_CLIP_STATES:
+                self._clip_states.pop(next(iter(self._clip_states)))
+            for waiter in self._clip_waiters.get(clip_id, ()):
+                if not waiter.done():
+                    waiter.set_result(value)
+
+    def _fail_pending(self, error: Exception) -> None:
+        if self._pending_response is not None and not self._pending_response.done():
+            self._pending_response.set_exception(error)
+        for waiters in self._clip_waiters.values():
+            for waiter in waiters:
+                if not waiter.done():
+                    waiter.set_exception(error)
 
     async def _discard(self) -> None:
         connection, self._connection = self._connection, None
+        reader, self._reader_task = self._reader_task, None
+        self._subscribed_players.clear()
+        if reader is not None and reader is not asyncio.current_task():
+            reader.cancel()
+            await asyncio.gather(reader, return_exceptions=True)
         if connection is not None:
             await connection.close()
 
 
-def _parse_response(raw_response: str | bytes) -> dict[str, Any]:
+def _parse_message(raw_message: str | bytes) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
-        response = json.loads(raw_response)
+        message = json.loads(raw_message)
     except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise LocalAPIError("player returned an invalid WebSocket response") from exc
     if (
-        not isinstance(response, list)
-        or len(response) != 2
-        or not all(isinstance(item, dict) for item in response)
+        not isinstance(message, list)
+        or len(message) != 2
+        or not all(isinstance(item, dict) for item in message)
     ):
         raise LocalAPIError("player returned an invalid WebSocket response")
-
-    header, body = response
-    if not header.get("success", False):
-        raise LocalAPIError.from_response(header, body)
-    return body
+    return message[0], message[1]

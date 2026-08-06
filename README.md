@@ -301,6 +301,7 @@ asyncio.run(main())
 | Method | Returns | Description |
 | --- | --- | --- |
 | `await play_audio_clip(stream_url=None, *, app_id, name="sonosify", volume=None, priority=ClipPriority.LOW, clip_type=None, http_authorization=None, led_behavior=ClipLEDBehavior.NONE)` | `AudioClip` | Schedules a clip. Omitting `stream_url` plays the built-in chime |
+| `await play_audio_clip_data(audio, *, content_type="audio/wav", local_host=None, app_id, name="sonosify", volume=None, priority=ClipPriority.LOW, clip_type=None, led_behavior=ClipLEDBehavior.NONE)` | `HostedAudioClip` | Hosts complete WAV or MP3 data temporarily and schedules it as a clip |
 | `await cancel_audio_clip(clip_id)` | `None` | Cancels a scheduled or active clip |
 
 Arguments are validated before the request: `name` 1–64 characters, `app_id`
@@ -314,6 +315,30 @@ The player must expose the `AUDIO_CLIP` capability, and it must be able to fetch
 the supplied HTTP(S) URL itself. A client keeps its local command WebSocket open
 so a subsequent `cancel_audio_clip` does not require another connection
 handshake. If the player closes the socket, the next command reconnects.
+
+For audio already available in memory, `play_audio_clip_data` lazily starts a
+small HTTP server on the local machine and chooses the LAN address that routes
+to the player. The returned handle distinguishes a successful HTTP fetch from
+the terminal playback status reported by Sonos:
+
+```python
+handle = await kitchen.play_audio_clip_data(
+    response.audio,
+    content_type="audio/wav",
+    app_id="com.example.voice-agent",
+    name="Agent Voice",
+    priority=ClipPriority.HIGH,
+    clip_type=ClipType.VOICE_ASSISTANT,
+)
+
+await handle.wait_until_fetched(timeout=10)
+clip = await handle.wait_until_finished(timeout=60)
+print(clip.status)  # DONE, INTERRUPTED, DISMISSED, or ERROR
+```
+
+`local_host` can override the advertised address on machines with unusual
+network routing. The temporary server and all remaining clip data are released
+when the client closes. `HostedAudioClip.close()` can release one clip earlier.
 
 ### Live events
 

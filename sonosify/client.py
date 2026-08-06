@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from enum import StrEnum
 from typing import Self
@@ -10,6 +11,8 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 import sonosify._websocket as _websocket
+from sonosify._clip_server import AudioClipServer, _local_ip_for
+from sonosify._hosted_clip import HostedAudioClip
 from sonosify._parsing import int_or_none, local_name
 from sonosify.audio_clip import (
     AudioClip,
@@ -58,6 +61,7 @@ class SonosClient:
         self._owns_client = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=timeout)
         self._audio_clip_websocket = _websocket.AudioClipWebSocket(ip, timeout=timeout)
+        self._audio_clip_server: AudioClipServer | None = None
 
     @classmethod
     def from_speaker(
@@ -83,6 +87,9 @@ class SonosClient:
 
     async def close(self) -> None:
         await self._audio_clip_websocket.close()
+        if self._audio_clip_server is not None:
+            await asyncio.to_thread(self._audio_clip_server.close)
+            self._audio_clip_server = None
         if self._owns_client:
             await self._http.aclose()
 
@@ -104,18 +111,13 @@ class SonosClient:
         http_authorization: str | None = None,
         led_behavior: ClipLEDBehavior = ClipLEDBehavior.NONE,
     ) -> AudioClip:
-        if not 1 <= len(name) <= 64:
-            raise ValueError("audio clip name must contain 1 to 64 characters")
-        if not app_id or len(app_id) > 127:
-            raise ValueError("app_id must contain 1 to 127 characters")
-        if volume is not None and not 0 <= volume <= 100:
-            raise ValueError("audio clip volume must be between 0 and 100")
-        if stream_url is not None:
-            parsed = urlparse(stream_url)
-            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                raise ValueError("stream_url must be an absolute HTTP(S) URL")
-        if http_authorization is not None and len(http_authorization.encode()) > 512:
-            raise ValueError("http_authorization must contain at most 512 bytes")
+        _validate_audio_clip_arguments(
+            stream_url=stream_url,
+            app_id=app_id,
+            name=name,
+            volume=volume,
+            http_authorization=http_authorization,
+        )
 
         options: dict[str, object] = {
             "name": name,
@@ -142,6 +144,59 @@ class SonosClient:
             options,
         )
         return AudioClip.model_validate(result)
+
+    async def play_audio_clip_data(
+        self,
+        audio: bytes,
+        *,
+        content_type: str = "audio/wav",
+        local_host: str | None = None,
+        app_id: str,
+        name: str = "sonosify",
+        volume: int | None = None,
+        priority: ClipPriority = ClipPriority.LOW,
+        clip_type: ClipType | None = None,
+        led_behavior: ClipLEDBehavior = ClipLEDBehavior.NONE,
+    ) -> HostedAudioClip:
+        if not audio:
+            raise ValueError("audio clip data must not be empty")
+        if content_type not in {"audio/mpeg", "audio/wav"}:
+            raise ValueError("content_type must be 'audio/mpeg' or 'audio/wav'")
+        _validate_audio_clip_arguments(
+            stream_url=None,
+            app_id=app_id,
+            name=name,
+            volume=volume,
+            http_authorization=None,
+        )
+
+        player_id = await self._player_id()
+        await self._audio_clip_websocket.subscribe_audio_clips(player_id)
+        server = self._ensure_audio_clip_server()
+        token, fetched = server.add(audio, content_type)
+        host = local_host or _local_ip_for(self._ip)
+        stream_url = f"http://{host}:{server.port}/{token}"
+        try:
+            clip = await self.play_audio_clip(
+                stream_url,
+                app_id=app_id,
+                name=name,
+                volume=volume,
+                priority=priority,
+                clip_type=clip_type,
+                led_behavior=led_behavior,
+            )
+        except BaseException:
+            server.remove(token)
+            raise
+        return HostedAudioClip(
+            clip,
+            fetched=fetched,
+            server=server,
+            token=token,
+            websocket=self._audio_clip_websocket,
+            cancel=self.cancel_audio_clip,
+        )
 
     async def cancel_audio_clip(self, clip_id: str) -> None:
         if not clip_id:
@@ -178,6 +233,11 @@ class SonosClient:
                 if self._uid:
                     return self._uid
         raise LocalAPIError("player device metadata contains no UDN")
+
+    def _ensure_audio_clip_server(self) -> AudioClipServer:
+        if self._audio_clip_server is None:
+            self._audio_clip_server = AudioClipServer()
+        return self._audio_clip_server
 
     async def play(self) -> None:
         await self.__av_transport("Play", Speed="1")
@@ -544,6 +604,28 @@ class _RepeatMode(StrEnum):
     OFF = "off"
     ONE = "one"
     ALL = "all"
+
+
+def _validate_audio_clip_arguments(
+    *,
+    stream_url: str | None,
+    app_id: str,
+    name: str,
+    volume: int | None,
+    http_authorization: str | None,
+) -> None:
+    if not 1 <= len(name) <= 64:
+        raise ValueError("audio clip name must contain 1 to 64 characters")
+    if not app_id or len(app_id) > 127:
+        raise ValueError("app_id must contain 1 to 127 characters")
+    if volume is not None and not 0 <= volume <= 100:
+        raise ValueError("audio clip volume must be between 0 and 100")
+    if stream_url is not None:
+        parsed = urlparse(stream_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("stream_url must be an absolute HTTP(S) URL")
+    if http_authorization is not None and len(http_authorization.encode()) > 512:
+        raise ValueError("http_authorization must contain at most 512 bytes")
 
 
 def _repeat_from_play_mode(mode: str) -> _RepeatMode:

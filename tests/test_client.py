@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 import sonosify.client as client_module
-from sonosify import Favorite, Speaker
+from sonosify import ClipStatus, Favorite, Speaker
 from sonosify.client import PositionInfo, SonosClient, TransportInfo
 from sonosify.errors import LocalAPIError, NetworkError
 from sonosify.events import EventSubscription
@@ -177,6 +177,114 @@ def test_play_audio_clip_includes_http_authorization_option(
     )
 
     assert calls[0][1]["httpAuthorization"] == "Bearer x"
+
+
+def test_play_audio_clip_data_hosts_audio_and_waits_for_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeServer:
+        port = 4321
+
+        def __init__(self) -> None:
+            self.fetched = asyncio.Event()
+            self.fetched.set()
+            self.added: list[tuple[bytes, str]] = []
+            self.removed: list[str] = []
+
+        def add(self, audio: bytes, content_type: str) -> tuple[str, asyncio.Event]:
+            self.added.append((audio, content_type))
+            return "token.wav", self.fetched
+
+        def remove(self, token: str) -> None:
+            self.removed.append(token)
+
+        def close(self) -> None:
+            pass
+
+    subscriptions: list[str] = []
+    commands: list[tuple[object, object]] = []
+
+    async def subscribe(self: object, player_id: str) -> None:
+        subscriptions.append(player_id)
+
+    async def send_command(
+        self: object, command: object, options: object
+    ) -> dict[str, object]:
+        commands.append((command, options))
+        return {
+            "id": "clip-1",
+            "name": "Agent",
+            "appId": "com.example.agent",
+        }
+
+    async def wait_for_audio_clip(
+        self: object, clip_id: str, *, timeout: float | None = None
+    ) -> dict[str, object]:
+        return {
+            "id": clip_id,
+            "name": "Agent",
+            "appId": "com.example.agent",
+            "status": "DONE",
+        }
+
+    server = FakeServer()
+    monkeypatch.setattr(client_module, "AudioClipServer", lambda: server)
+    monkeypatch.setattr(client_module, "_local_ip_for", lambda ip: "192.168.1.20")
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket,
+        "subscribe_audio_clips",
+        subscribe,
+    )
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket, "send_command", send_command
+    )
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket,
+        "wait_for_audio_clip",
+        wait_for_audio_clip,
+    )
+
+    async def run() -> tuple[bool, ClipStatus | None]:
+        client = SonosClient("192.168.1.10", uid="RINCON_1")
+        handle = await client.play_audio_clip_data(
+            b"wav-data",
+            app_id="com.example.agent",
+            name="Agent",
+        )
+        await handle.wait_until_fetched(timeout=1.0)
+        finished = await handle.wait_until_finished(timeout=1.0)
+        return handle.fetched, finished.status
+
+    fetched, status = asyncio.run(run())
+
+    assert fetched is True
+    assert status is ClipStatus.DONE
+    assert subscriptions == ["RINCON_1"]
+    assert server.added == [(b"wav-data", "audio/wav")]
+    assert server.removed == ["token.wav"]
+    assert commands[0][1]["streamUrl"] == ("http://192.168.1.20:4321/token.wav")
+
+
+@pytest.mark.parametrize(
+    ("audio", "content_type", "match"),
+    [
+        (b"", "audio/wav", "must not be empty"),
+        (b"audio", "audio/ogg", "content_type"),
+    ],
+)
+def test_play_audio_clip_data_validates_local_media(
+    audio: bytes, content_type: str, match: str
+) -> None:
+    client = SonosClient("192.168.1.10", uid="RINCON_1")
+
+    with pytest.raises(ValueError, match=match):
+        _run(
+            client.play_audio_clip_data(
+                audio,
+                content_type=content_type,
+                app_id="com.example.agent",
+            )
+        )
 
 
 def test_cancel_audio_clip_rejects_empty_clip_id() -> None:

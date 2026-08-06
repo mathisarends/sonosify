@@ -1,6 +1,8 @@
+from ._hosted_clip import HostedAudioClip as HostedAudioClip
 from .audio_clip import AudioClip as AudioClip
 from .audio_clip import ClipLEDBehavior as ClipLEDBehavior
 from .audio_clip import ClipPriority as ClipPriority
+from .audio_clip import ClipStatus as ClipStatus
 from .audio_clip import ClipType as ClipType
 from .client import PositionInfo as PositionInfo
 from .client import SonosClient as SonosClient

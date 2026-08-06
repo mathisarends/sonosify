@@ -16,6 +16,7 @@ from sonosify.errors import LocalAPIError, NetworkError
 class _Connection:
     def __init__(self, *responses: str, send_error: Exception | None = None) -> None:
         self._responses = list(responses)
+        self._incoming: asyncio.Queue[str] = asyncio.Queue()
         self._send_error = send_error
         self._awaiting_response = False
         self.state = State.OPEN
@@ -29,11 +30,15 @@ class _Connection:
             raise AssertionError("commands were sent concurrently")
         self._awaiting_response = True
         self.sent.append(payload)
+        self._incoming.put_nowait(self._responses.pop(0))
 
     async def recv(self) -> str:
-        await asyncio.sleep(0)
+        response = await self._incoming.get()
         self._awaiting_response = False
-        return self._responses.pop(0)
+        return response
+
+    def emit(self, message: str) -> None:
+        self._incoming.put_nowait(message)
 
     async def close(self) -> None:
         self.close_calls += 1
@@ -222,3 +227,63 @@ def test_websocket_transport_preserves_sonos_error(
         assert excinfo.value.error_details()["sonos_code"] == "ERROR_COMMAND_FAILED"
 
     asyncio.run(run())
+
+
+def test_websocket_transport_routes_audio_clip_status_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _Connection(
+        '[{"success": true}, {}]',
+        '[{"success": true}, {"id": "clip-1"}]',
+    )
+
+    async def connect(*args: object, **kwargs: object) -> _Connection:
+        return connection
+
+    monkeypatch.setattr(websocket_module, "connect", connect)
+
+    async def run() -> dict[str, Any]:
+        transport = AudioClipWebSocket("192.168.1.10", timeout=3.0)
+        await transport.subscribe_audio_clips("RINCON_1")
+        await transport.send_command({"command": "loadAudioClip"})
+        connection.emit(
+            '[{"namespace": "audioClip:1", "type": "audioClipStatus"}, '
+            '{"audioClips": [{"id": "clip-1", "name": "Agent", '
+            '"appId": "com.example.agent", "status": "DONE"}]}]'
+        )
+        result = await transport.wait_for_audio_clip("clip-1", timeout=1.0)
+        await transport.close()
+        return result
+
+    result = asyncio.run(run())
+
+    assert result["status"] == "DONE"
+    assert json.loads(connection.sent[0])[0]["command"] == "subscribe"
+
+
+def test_websocket_transport_accepts_event_before_command_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _Connection('[{"success": true}, {"id": "clip-1"}]')
+    connection.emit(
+        '[{"namespace": "audioClip:1", "type": "audioClipStatus"}, '
+        '{"audioClips": [{"id": "clip-1", "name": "Agent", '
+        '"appId": "com.example.agent", "status": "DONE"}]}]'
+    )
+
+    async def connect(*args: object, **kwargs: object) -> _Connection:
+        return connection
+
+    monkeypatch.setattr(websocket_module, "connect", connect)
+
+    async def run() -> tuple[dict[str, Any], dict[str, Any]]:
+        transport = AudioClipWebSocket("192.168.1.10", timeout=3.0)
+        response = await transport.send_command({"command": "loadAudioClip"})
+        event = await transport.wait_for_audio_clip("clip-1", timeout=1.0)
+        await transport.close()
+        return response, event
+
+    response, event = asyncio.run(run())
+
+    assert response == {"id": "clip-1"}
+    assert event["status"] == "DONE"

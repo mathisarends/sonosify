@@ -22,6 +22,16 @@ class ClipLEDBehavior(StrEnum):
     WHITE_LED_QUICK_BREATHING = "WHITE_LED_QUICK_BREATHING"
 
 
+class ClipStatus(StrEnum):
+    PENDING = "PENDING"
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
+    DONE = "DONE"
+    DISMISSED = "DISMISSED"
+    ERROR = "ERROR"
+    INTERRUPTED = "INTERRUPTED"
+
+
 class AudioClip(BaseModel):
     """Typed view of the ``loadAudioClip`` WebSocket command response."""
 
@@ -37,5 +47,5 @@ class AudioClip(BaseModel):
     app_id: str
     priority: ClipPriority = ClipPriority.LOW
     clip_type: ClipType | None = None
-    status: str = ""
+    status: ClipStatus | None = None
     error_code: str = ""
