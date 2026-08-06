@@ -4,51 +4,7 @@ import httpx
 import pytest
 
 from sonosify.errors import NetworkError, UPnPError
-from sonosify.soap import build_envelope, parse_response, parse_upnp_error, soap_call
-
-
-def test_build_envelope_sorts_and_escapes_args() -> None:
-    envelope = build_envelope("urn:test", "DoThing", {"B": "x&y", "A": "1"})
-
-    assert envelope.index("<A>1</A>") < envelope.index("<B>x&amp;y</B>")
-    assert "SOAPACTION" not in envelope
-
-
-def test_parse_response_reads_direct_children() -> None:
-    raw = """
-    <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
-      <s:Body>
-        <u:GetVolumeResponse xmlns:u="urn:test">
-          <CurrentVolume>23</CurrentVolume>
-        </u:GetVolumeResponse>
-      </s:Body>
-    </s:Envelope>
-    """
-
-    assert parse_response(raw) == {"CurrentVolume": "23"}
-
-
-def test_parse_upnp_error() -> None:
-    raw = """
-    <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
-      <s:Body><s:Fault><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0">
-        <errorCode>701</errorCode><errorDescription>Transition not available</errorDescription>
-      </UPnPError></detail></s:Fault></s:Body>
-    </s:Envelope>
-    """
-
-    error = parse_upnp_error(raw)
-
-    assert error is not None
-    assert error.code == "701"
-    assert "Transition not available" in str(error)
-    with pytest.raises(AttributeError):
-        error.code = "0"  # type: ignore[misc]
-
-
-def test_parse_upnp_error_returns_none_for_non_upnp_fault() -> None:
-    assert parse_upnp_error("<s:Envelope/>") is None
-    assert parse_upnp_error("<not valid xml") is None
+from sonosify.soap import soap_call
 
 
 def _client(
@@ -56,6 +12,36 @@ def _client(
 ) -> httpx.AsyncClient:
     transport = handler or httpx.MockTransport(lambda request: httpx.Response(200))
     return httpx.AsyncClient(transport=transport, **kwargs)
+
+
+def test_soap_call_sorts_and_escapes_envelope_args() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            text=(
+                '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+                "<s:Body></s:Body></s:Envelope>"
+            ),
+        )
+
+    async def run() -> None:
+        async with _client(httpx.MockTransport(handler)) as client:
+            await soap_call(
+                client,
+                "http://host/Control",
+                "urn:test",
+                "DoThing",
+                {"B": "x&y", "A": "1"},
+            )
+
+    asyncio.run(run())
+
+    envelope = requests[0].content.decode()
+    assert envelope.index("<A>1</A>") < envelope.index("<B>x&amp;y</B>")
+    assert requests[0].headers["SOAPACTION"] == '"urn:test#DoThing"'
 
 
 def test_soap_call_parses_successful_response() -> None:
@@ -101,6 +87,28 @@ def test_soap_call_raises_upnp_error_on_server_fault() -> None:
     with pytest.raises(UPnPError) as excinfo:
         asyncio.run(run())
     assert excinfo.value.code == "701"
+    assert "Transition not available" in str(excinfo.value)
+    with pytest.raises(AttributeError):
+        excinfo.value.code = "0"  # type: ignore[misc]
+
+
+def test_soap_call_raises_http_error_when_fault_has_no_upnp_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            text=(
+                '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+                "<s:Body><s:Fault><detail>unexpected</detail></s:Fault></s:Body>"
+                "</s:Envelope>"
+            ),
+        )
+
+    async def run() -> None:
+        async with _client(httpx.MockTransport(handler)) as client:
+            await soap_call(client, "http://host/Control", "urn:test", "Play")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(run())
 
 
 def test_soap_call_raises_http_error_for_unparseable_server_error() -> None:
