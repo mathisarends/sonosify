@@ -27,7 +27,6 @@ from sonosify.events import EventService, EventSubscription, TransportState
 from sonosify.events.models import DEFAULT_SERVICES
 from sonosify.models import Favorite, PlaybackState, Speaker, Track
 from sonosify.soap import soap_call
-from sonosify.spotify import parse_track_id, track_metadata
 
 DEFAULT_TIMEOUT = 15.0
 
@@ -323,20 +322,6 @@ class SonosClient:
             await self.seek_queue(position)
             await self.play()
         return position
-
-    async def open_track(
-        self, value: str, *, title: str = "", next_: bool = False, play: bool = False
-    ) -> int | None:
-        track = parse_track_id(value)
-        if play and not next_:
-            await self.play_uri(track.sonos_uri, title=title or track.uri)
-            return None
-        return await self.enqueue_uri(
-            track.sonos_uri,
-            metadata=track_metadata(track, title),
-            next_=next_,
-            play=play,
-        )
 
     async def line_in(self, source: Speaker | str | None = None) -> None:
         source_uid = self._source_uid(source)

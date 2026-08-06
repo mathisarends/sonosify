@@ -343,40 +343,6 @@ def test_enqueue_uri_with_play_seeks_and_plays(recorder: _RecordingSoap) -> None
     assert actions == ["AddURIToQueue", "Seek", "Play"]
 
 
-def test_open_track_plays_immediately_when_not_enqueue_only(
-    recorder: _RecordingSoap,
-) -> None:
-    client = SonosClient("192.168.1.10")
-
-    position = _run(client.open_track("abc123", title="Focus", play=True))
-
-    assert position is None
-    actions = [call[2] for call in recorder.calls]
-    assert actions == ["SetAVTransportURI", "Play"]
-    assert "x-sonos-spotify" in recorder.calls[0][3]["CurrentURI"]
-
-
-def test_open_track_enqueues_when_not_playing(recorder: _RecordingSoap) -> None:
-    recorder._responses["AddURIToQueue"] = {"FirstTrackNumberEnqueued": "2"}
-    client = SonosClient("192.168.1.10")
-
-    position = _run(client.open_track("abc123", play=False))
-
-    assert position == 2
-    assert recorder.calls[0][2] == "AddURIToQueue"
-
-
-def test_open_track_next_flag_enqueues_even_when_play_requested(
-    recorder: _RecordingSoap,
-) -> None:
-    client = SonosClient("192.168.1.10")
-
-    _run(client.open_track("abc123", next_=True, play=True))
-
-    assert recorder.calls[0][2] == "AddURIToQueue"
-    assert recorder.calls[0][3]["EnqueueAsNext"] == "1"
-
-
 def test_line_in_uses_explicit_speaker_source(recorder: _RecordingSoap) -> None:
     client = SonosClient("192.168.1.10")
     source = Speaker(ip="192.168.1.11", room_name="Office", uid="RINCON_SRC")
