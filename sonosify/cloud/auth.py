@@ -145,7 +145,7 @@ class SonosCloudAuth:
                 return self._environment_token
             raise CloudConfigurationError(
                 _ACCESS_TOKEN_ENV,
-                f"{_TOKEN_CACHE_ENV} (cache created by `sonosify cloud login`)",
+                f"{_TOKEN_CACHE_ENV} (cache populated via async_exchange_code)",
             )
 
     def load_token(self) -> OAuthToken | None:
