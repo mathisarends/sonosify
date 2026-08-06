@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Sequence
 from typing import override
 
@@ -25,6 +27,38 @@ class NetworkError(SonosifyError):
     @override
     def error_details(self) -> dict[str, object]:
         return {"code": "network_error"}
+
+
+class LocalAPIError(SonosifyError):
+    __slots__ = ("_response",)
+
+    def __init__(
+        self, message: str, *, response: dict[str, object] | None = None
+    ) -> None:
+        self._response = response or {}
+        super().__init__(message)
+
+    @classmethod
+    def from_response(
+        cls, header: dict[str, object], body: dict[str, object]
+    ) -> LocalAPIError:
+        response = {**header, **body}
+        error_code = str(response.get("errorCode", ""))
+        message = "local Sonos command failed"
+        if error_code:
+            message = f"{message}: {error_code}"
+        return cls(message, response=response)
+
+    @property
+    def response(self) -> dict[str, object]:
+        return dict(self._response)
+
+    @override
+    def error_details(self) -> dict[str, object]:
+        details: dict[str, object] = {"code": "local_api_error"}
+        if error_code := self._response.get("errorCode"):
+            details["sonos_code"] = error_code
+        return details
 
 
 class SpeakerNotFoundError(SonosifyError):

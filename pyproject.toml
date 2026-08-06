@@ -1,6 +1,6 @@
 [project]
 name = "sonosify"
-version = "0.3.0"
+version = "0.3.1"
 description = "Programmatic Python API for discovering and controlling Sonos speakers."
 readme = "README.md"
 license = "MIT"
@@ -10,6 +10,7 @@ dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
+    "websockets>=16.1",
 ]
 
 [project.optional-dependencies]

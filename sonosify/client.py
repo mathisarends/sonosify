@@ -2,17 +2,27 @@ from __future__ import annotations
 
 from enum import StrEnum
 from typing import Self
+from urllib.parse import urlparse
+from xml.etree import ElementTree
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from sonosify._parsing import int_or_none
+from sonosify._parsing import int_or_none, local_name
+from sonosify._websocket import send_websocket_command
+from sonosify.cloud.models import (
+    AudioClip,
+    ClipLEDBehavior,
+    ClipPriority,
+    ClipType,
+)
 from sonosify.didl import (
     parse_favorites,
     parse_track_metadata,
     radio_metadata,
     radio_uri,
 )
+from sonosify.errors import LocalAPIError, NetworkError
 from sonosify.events import EventService, EventSubscription, TransportState
 from sonosify.events.models import DEFAULT_SERVICES
 from sonosify.models import Favorite, PlaybackState, Speaker, Track
@@ -73,7 +83,7 @@ class PositionInfo(BaseModel):
 
 
 class SonosClient:
-    __slots__ = ("_http", "_ip", "_owns_client", "_port", "_uid")
+    __slots__ = ("_http", "_ip", "_owns_client", "_port", "_timeout", "_uid")
 
     def __init__(
         self,
@@ -87,6 +97,7 @@ class SonosClient:
         self._ip = ip
         self._port = port
         self._uid = uid
+        self._timeout = timeout
         self._owns_client = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=timeout)
 
@@ -121,6 +132,97 @@ class SonosClient:
 
     async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
         await self.close()
+
+    async def play_audio_clip(
+        self,
+        stream_url: str | None = None,
+        *,
+        app_id: str,
+        name: str = "sonosify",
+        volume: int | None = None,
+        priority: ClipPriority = ClipPriority.LOW,
+        clip_type: ClipType | None = None,
+        http_authorization: str | None = None,
+        led_behavior: ClipLEDBehavior = ClipLEDBehavior.NONE,
+    ) -> AudioClip:
+        if not 1 <= len(name) <= 64:
+            raise ValueError("audio clip name must contain 1 to 64 characters")
+        if not app_id or len(app_id) > 127:
+            raise ValueError("app_id must contain 1 to 127 characters")
+        if volume is not None and not 0 <= volume <= 100:
+            raise ValueError("audio clip volume must be between 0 and 100")
+        if stream_url is not None:
+            parsed = urlparse(stream_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("stream_url must be an absolute HTTP(S) URL")
+        if http_authorization is not None and len(http_authorization.encode()) > 512:
+            raise ValueError("http_authorization must contain at most 512 bytes")
+
+        options: dict[str, object] = {
+            "name": name,
+            "appId": app_id,
+            "priority": priority.value,
+            "clipLEDBehavior": led_behavior.value,
+        }
+        if stream_url is not None:
+            options["streamUrl"] = stream_url
+        if volume is not None:
+            options["volume"] = volume
+        if clip_type is not None:
+            options["clipType"] = clip_type.value
+        if http_authorization is not None:
+            options["httpAuthorization"] = http_authorization
+
+        player_id = await self._player_id()
+        result = await send_websocket_command(
+            self._ip,
+            {
+                "namespace": "audioClip:1",
+                "command": "loadAudioClip",
+                "playerId": player_id,
+            },
+            options,
+            timeout=self._timeout,
+        )
+        return AudioClip.model_validate(result)
+
+    async def cancel_audio_clip(self, clip_id: str) -> None:
+        if not clip_id:
+            raise ValueError("clip_id must not be empty")
+        player_id = await self._player_id()
+        await send_websocket_command(
+            self._ip,
+            {
+                "namespace": "audioClip:1",
+                "command": "cancelAudioClip",
+                "playerId": player_id,
+            },
+            {"clipId": clip_id},
+            timeout=self._timeout,
+        )
+
+    async def _player_id(self) -> str:
+        if self._uid:
+            return self._uid
+        try:
+            response = await self._http.get(
+                f"{self.base_url}/xml/device_description.xml"
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise NetworkError(
+                f"cannot read Sonos device identity from {self._ip}: {exc}"
+            ) from exc
+        try:
+            root = ElementTree.fromstring(response.content)
+        except ElementTree.ParseError as exc:
+            raise LocalAPIError("player returned invalid device metadata") from exc
+        for element in root.iter():
+            if local_name(element.tag) == "UDN" and element.text:
+                self._uid = element.text.strip().removeprefix("uuid:")
+                if self._uid:
+                    return self._uid
+        raise LocalAPIError("player device metadata contains no UDN")
 
     async def play(self) -> None:
         await self.__av_transport("Play", Speed="1")

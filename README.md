@@ -96,6 +96,40 @@ async def main():
 asyncio.run(main())
 ```
 
+### Local audio clips
+
+Audio clips can also use the player's local Control API WebSocket, without
+OAuth or a round trip through the Sonos cloud. Discovery is required because
+the command targets the speaker's immutable player ID:
+
+```python
+import asyncio
+
+from sonosify import ClipPriority, ClipType, SonosController
+
+
+async def main():
+    sonos = SonosController()
+    async with await sonos.client("Kitchen") as kitchen:
+        clip = await kitchen.play_audio_clip(
+            "http://192.168.1.50:8000/tts/response.mp3",
+            app_id="com.example.voice-agent",
+            name="Agent Voice",
+            volume=30,
+            priority=ClipPriority.HIGH,
+            clip_type=ClipType.VOICE_ASSISTANT,
+        )
+        print(clip.id)
+
+
+asyncio.run(main())
+```
+
+The player must expose the `AUDIO_CLIP` capability, and it must be able to
+fetch the supplied HTTP(S) URL itself. `cancel_audio_clip(clip.id)` cancels a
+scheduled or active clip. The current implementation opens one WebSocket per
+command; connection reuse can be added later without changing these methods.
+
 ## Setting up cloud credentials
 
 The Sonos Control API (`sonosify.cloud`) talks to Sonos's cloud service instead
@@ -265,6 +299,7 @@ uv run python examples/discover.py
 uv run python examples/now_playing.py Kitchen
 uv run python examples/watch.py Kitchen
 uv run python examples/play_radio.py Kitchen https://example.com/live.mp3 "Example Radio"
+uv run python examples/local_audio_clip.py --volume 30  # uses SONOS_IP_ADDRESS
 uv run python examples/resume_playback.py Kitchen
 uv run python examples/volume.py Kitchen 25
 uv run python examples/favorites.py Kitchen
