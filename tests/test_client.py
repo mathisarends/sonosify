@@ -257,7 +257,7 @@ def test_cancel_audio_clip_sends_clip_id(monkeypatch: pytest.MonkeyPatch) -> Non
         "command": "cancelAudioClip",
         "playerId": "RINCON_1",
     }
-    assert calls[0][1] == {"clipId": "clip-1"}
+    assert calls[0][1] == {"id": "clip-1"}
 
 
 def test_local_audio_clip_resolves_player_id_from_configured_ip(

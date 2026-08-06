@@ -153,7 +153,7 @@ class SonosClient:
                 "command": "cancelAudioClip",
                 "playerId": player_id,
             },
-            {"clipId": clip_id},
+            {"id": clip_id},
         )
 
     async def _player_id(self) -> str:
