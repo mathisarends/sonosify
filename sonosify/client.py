@@ -8,8 +8,8 @@ from xml.etree import ElementTree
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+import sonosify._websocket as _websocket
 from sonosify._parsing import int_or_none, local_name
-from sonosify._websocket import send_websocket_command
 from sonosify.audio_clip import (
     AudioClip,
     ClipLEDBehavior,
@@ -50,9 +50,9 @@ class SonosClient:
         self._ip = ip
         self._port = port
         self._uid = uid
-        self._timeout = timeout
         self._owns_client = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=timeout)
+        self._audio_clip_websocket = _websocket.AudioClipWebSocket(ip, timeout=timeout)
 
     @classmethod
     def from_speaker(
@@ -77,6 +77,7 @@ class SonosClient:
         return self._uid
 
     async def close(self) -> None:
+        await self._audio_clip_websocket.close()
         if self._owns_client:
             await self._http.aclose()
 
@@ -127,15 +128,13 @@ class SonosClient:
             options["httpAuthorization"] = http_authorization
 
         player_id = await self._player_id()
-        result = await send_websocket_command(
-            self._ip,
+        result = await self._audio_clip_websocket.send_command(
             {
                 "namespace": "audioClip:1",
                 "command": "loadAudioClip",
                 "playerId": player_id,
             },
             options,
-            timeout=self._timeout,
         )
         return AudioClip.model_validate(result)
 
@@ -143,15 +142,13 @@ class SonosClient:
         if not clip_id:
             raise ValueError("clip_id must not be empty")
         player_id = await self._player_id()
-        await send_websocket_command(
-            self._ip,
+        await self._audio_clip_websocket.send_command(
             {
                 "namespace": "audioClip:1",
                 "command": "cancelAudioClip",
                 "playerId": player_id,
             },
             {"clipId": clip_id},
-            timeout=self._timeout,
         )
 
     async def _player_id(self) -> str:
@@ -331,13 +328,13 @@ class SonosClient:
         await self.set_mute(muted)
         return muted
 
-    async def get_transport_info(self) -> _TransportInfo:
+    async def get_transport_info(self) -> TransportInfo:
         result = await self.__av_transport("GetTransportInfo")
-        return _TransportInfo.model_validate(result)
+        return TransportInfo.model_validate(result)
 
-    async def get_position_info(self) -> _PositionInfo:
+    async def get_position_info(self) -> PositionInfo:
         result = await self.__av_transport("GetPositionInfo")
-        return _PositionInfo.model_validate(result)
+        return PositionInfo.model_validate(result)
 
     async def now_playing(self) -> PlaybackState:
         transport = await self.get_transport_info()
@@ -500,13 +497,7 @@ class SonosClient:
         raise ValueError("line-in playback requires a source Speaker or RINCON uid")
 
 
-class _RepeatMode(StrEnum):
-    OFF = "off"
-    ONE = "one"
-    ALL = "all"
-
-
-class _TransportInfo(BaseModel):
+class TransportInfo(BaseModel):
     """Typed view of the AVTransport GetTransportInfo response."""
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
@@ -526,7 +517,7 @@ class _TransportInfo(BaseModel):
             return None
 
 
-class _PositionInfo(BaseModel):
+class PositionInfo(BaseModel):
     """Typed view of the AVTransport GetPositionInfo response."""
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
@@ -542,6 +533,12 @@ class _PositionInfo(BaseModel):
     @classmethod
     def _coerce_track(cls, value: object) -> object:
         return int_or_none(value) if isinstance(value, str) else value
+
+
+class _RepeatMode(StrEnum):
+    OFF = "off"
+    ONE = "one"
+    ALL = "all"
 
 
 def _repeat_from_play_mode(mode: str) -> _RepeatMode:

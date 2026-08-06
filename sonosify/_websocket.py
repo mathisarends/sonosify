@@ -6,49 +6,89 @@ import ssl
 from collections.abc import Mapping
 from typing import Any
 
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import WebSocketException
+from websockets.protocol import State
+from websockets.typing import Subprotocol
 
 from sonosify.errors import LocalAPIError, NetworkError
 
 # The LAN handshake requires this header but doesn't authenticate its value.
 # This recognizable UUID-shaped placeholder is not a credential or secret.
 _API_KEY = "123e4567-e89b-12d3-a456-426655440000"
-_SUBPROTOCOL = "v1.api.smartspeaker.audio"
+_SUBPROTOCOL = Subprotocol("v1.api.smartspeaker.audio")
 
 
-async def send_websocket_command(
-    ip: str,
-    command: Mapping[str, Any],
-    options: Mapping[str, Any] | None = None,
-    *,
-    timeout: float,
-) -> dict[str, Any]:
-    uri = f"wss://{ip}:1443/websocket/api"
-    ssl_context = ssl.create_default_context()
-    # Players don't present certificates rooted in the host's public trust store.
-    # The connection remains encrypted, but callers must trust the player on the LAN.
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-    payload = json.dumps([dict(command), dict(options or {})])
+class AudioClipWebSocket:
+    def __init__(self, ip: str, *, timeout: float) -> None:
+        self._ip = ip
+        self._timeout = timeout
+        self._connection: ClientConnection | None = None
+        self._command_lock = asyncio.Lock()
 
-    try:
-        async with connect(
-            uri,
-            additional_headers={"X-Sonos-Api-Key": _API_KEY},
-            subprotocols=[_SUBPROTOCOL],
-            compression=None,
-            open_timeout=timeout,
-            close_timeout=timeout,
-            proxy=None,
-            ssl=ssl_context,
-        ) as websocket:
-            async with asyncio.timeout(timeout):
-                await websocket.send(payload)
-                raw_response = await websocket.recv()
-    except (OSError, TimeoutError, WebSocketException) as exc:
-        raise NetworkError(f"local Sonos WebSocket request failed: {exc}") from exc
+    async def send_command(
+        self,
+        command: Mapping[str, Any],
+        options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = json.dumps([dict(command), dict(options or {})])
 
+        async with self._command_lock:
+            connection = await self._open()
+            try:
+                async with asyncio.timeout(self._timeout):
+                    await connection.send(payload)
+                    raw_response = await connection.recv()
+            except (OSError, TimeoutError, WebSocketException) as exc:
+                await self._discard()
+                raise NetworkError(
+                    f"local Sonos WebSocket request failed: {exc}"
+                ) from exc
+
+        return _parse_response(raw_response)
+
+    async def close(self) -> None:
+        async with self._command_lock:
+            await self._discard()
+
+    async def _open(self) -> ClientConnection:
+        if self._connection is not None:
+            if self._connection.state is State.OPEN:
+                return self._connection
+            await self._discard()
+
+        uri = f"wss://{self._ip}:1443/websocket/api"
+        ssl_context = ssl.create_default_context()
+        # Players don't present certificates rooted in the host's public trust store.
+        # The connection remains encrypted, but callers must trust the player on
+        # the LAN.
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+        try:
+            self._connection = await connect(
+                uri,
+                additional_headers={"X-Sonos-Api-Key": _API_KEY},
+                subprotocols=[_SUBPROTOCOL],
+                compression=None,
+                open_timeout=self._timeout,
+                close_timeout=self._timeout,
+                proxy=None,
+                ssl=ssl_context,
+            )
+        except (OSError, TimeoutError, WebSocketException) as exc:
+            raise NetworkError(
+                f"local Sonos WebSocket connection failed: {exc}"
+            ) from exc
+        return self._connection
+
+    async def _discard(self) -> None:
+        connection, self._connection = self._connection, None
+        if connection is not None:
+            await connection.close()
+
+
+def _parse_response(raw_response: str | bytes) -> dict[str, Any]:
     try:
         response = json.loads(raw_response)
     except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:

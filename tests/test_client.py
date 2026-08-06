@@ -5,7 +5,7 @@ import pytest
 
 import sonosify.client as client_module
 from sonosify import Favorite, Speaker
-from sonosify.client import SonosClient, _PositionInfo, _TransportInfo
+from sonosify.client import PositionInfo, SonosClient, TransportInfo
 from sonosify.events import EventSubscription
 
 
@@ -57,12 +57,34 @@ def test_context_manager_closes_owned_http_client() -> None:
     assert _run(run()) is True
 
 
+def test_close_closes_local_control_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    close_calls = 0
+
+    async def close(self: object) -> None:
+        nonlocal close_calls
+        close_calls += 1
+
+    monkeypatch.setattr(client_module._websocket.AudioClipWebSocket, "close", close)
+
+    async def run() -> None:
+        client = SonosClient("192.168.1.10")
+        await client.close()
+
+    asyncio.run(run())
+
+    assert close_calls == 1
+
+
 def test_play_audio_clip_sends_local_control_api_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[object, ...]] = []
 
-    async def send_command(*args: object, **kwargs: object) -> dict[str, object]:
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
         calls.append((*args, kwargs))
         return {
             "id": "clip-1",
@@ -72,7 +94,9 @@ def test_play_audio_clip_sends_local_control_api_command(
             "clipType": "VOICE_ASSISTANT",
         }
 
-    monkeypatch.setattr(client_module, "send_websocket_command", send_command)
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket, "send_command", send_command
+    )
     client = SonosClient("192.168.1.10", uid="RINCON_1", timeout=4.0)
 
     clip = _run(
@@ -89,7 +113,6 @@ def test_play_audio_clip_sends_local_control_api_command(
     assert clip.id == "clip-1"
     assert calls == [
         (
-            "192.168.1.10",
             {
                 "namespace": "audioClip:1",
                 "command": "loadAudioClip",
@@ -104,7 +127,7 @@ def test_play_audio_clip_sends_local_control_api_command(
                 "volume": 30,
                 "clipType": "VOICE_ASSISTANT",
             },
-            {"timeout": 4.0},
+            {},
         )
     ]
 
@@ -112,21 +135,25 @@ def test_play_audio_clip_sends_local_control_api_command(
 def test_cancel_audio_clip_sends_clip_id(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[object, ...]] = []
 
-    async def send_command(*args: object, **kwargs: object) -> dict[str, object]:
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
         calls.append((*args, kwargs))
         return {}
 
-    monkeypatch.setattr(client_module, "send_websocket_command", send_command)
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket, "send_command", send_command
+    )
     client = SonosClient("192.168.1.10", uid="RINCON_1")
 
     _run(client.cancel_audio_clip("clip-1"))
 
-    assert calls[0][1] == {
+    assert calls[0][0] == {
         "namespace": "audioClip:1",
         "command": "cancelAudioClip",
         "playerId": "RINCON_1",
     }
-    assert calls[0][2] == {"clipId": "clip-1"}
+    assert calls[0][1] == {"clipId": "clip-1"}
 
 
 def test_local_audio_clip_resolves_player_id_from_configured_ip(
@@ -145,7 +172,9 @@ def test_local_audio_clip_resolves_player_id_from_configured_ip(
             ),
         )
 
-    async def send_command(*args: object, **kwargs: object) -> dict[str, object]:
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
         calls.append((*args, kwargs))
         return {
             "id": "clip-1",
@@ -153,7 +182,9 @@ def test_local_audio_clip_resolves_player_id_from_configured_ip(
             "appId": "com.example.agent",
         }
 
-    monkeypatch.setattr(client_module, "send_websocket_command", send_command)
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket, "send_command", send_command
+    )
 
     async def run() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
@@ -163,7 +194,9 @@ def test_local_audio_clip_resolves_player_id_from_configured_ip(
 
     asyncio.run(run())
 
-    assert calls[0][1]["playerId"] == "RINCON_DIRECT"
+    command = calls[0][0]
+    assert isinstance(command, dict)
+    assert command["playerId"] == "RINCON_DIRECT"
 
 
 def test_close_leaves_externally_provided_http_client_open() -> None:
@@ -451,7 +484,7 @@ def test_get_transport_info_parses_response(recorder: _RecordingSoap) -> None:
 
     info = _run(client.get_transport_info())
 
-    assert isinstance(info, _TransportInfo)
+    assert isinstance(info, TransportInfo)
     assert info.state is not None
     assert info.state.value == "PLAYING"
 
@@ -473,7 +506,7 @@ def test_get_position_info_coerces_track_number(recorder: _RecordingSoap) -> Non
 
     info = _run(client.get_position_info())
 
-    assert isinstance(info, _PositionInfo)
+    assert isinstance(info, PositionInfo)
     assert info.track == 3
     assert info.track_uri == "x-sonos:1"
 

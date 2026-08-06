@@ -218,8 +218,8 @@ every member of the group at once.
 | Method | Returns | Description |
 | --- | --- | --- |
 | `await now_playing()` | `PlaybackState` | Combines transport state, the parsed current `Track`, elapsed time, and duration |
-| `await get_transport_info()` | transport info | Raw `GetTransportInfo` result: `state` (`TransportState`), `status`, `speed` |
-| `await get_position_info()` | position info | Raw `GetPositionInfo` result: track number, URI, duration, metadata, relative/absolute time |
+| `await get_transport_info()` | `TransportInfo` | Raw `GetTransportInfo` result: `state` (`TransportState`), `status`, `speed` |
+| `await get_position_info()` | `PositionInfo` | Raw `GetPositionInfo` result: track number, URI, duration, metadata, relative/absolute time |
 | `await get_room_name()` | `str` | The speaker's zone name |
 | `await get_zone_group_state()` | `str` | Raw zone group topology XML (used internally by discovery) |
 
@@ -311,8 +311,9 @@ Enums: `ClipPriority` (`LOW`, `HIGH`), `ClipType` (`CHIME`, `CUSTOM`,
 `VOICE_ASSISTANT`), `ClipLEDBehavior` (`NONE`, `WHITE_LED_QUICK_BREATHING`).
 
 The player must expose the `AUDIO_CLIP` capability, and it must be able to fetch
-the supplied HTTP(S) URL itself. The current implementation opens one WebSocket
-per command; connection reuse can be added later without changing these methods.
+the supplied HTTP(S) URL itself. A client keeps its local command WebSocket open
+so a subsequent `cancel_audio_clip` does not require another connection
+handshake. If the player closes the socket, the next command reconnects.
 
 ### Live events
 
@@ -378,6 +379,8 @@ All models are frozen Pydantic models.
 | `PlaybackState` | `state`, `track`, `relative_time`, `absolute_time`, `track_duration` |
 | `Favorite` | `title`, `uri`, `metadata`, `album_art_uri` |
 | `AudioClip` | `id`, `name`, `app_id`, `priority`, `clip_type`, `status`, `error_code` |
+| `TransportInfo` | `state` (`TransportState`), `status`, `speed` |
+| `PositionInfo` | `track`, `track_uri`, `track_duration`, `track_metadata`, `relative_time`, `absolute_time` |
 
 ### Errors
 
