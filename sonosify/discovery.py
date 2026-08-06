@@ -1,11 +1,14 @@
 import asyncio
+import select
 import socket
+import time
 from collections.abc import Iterable
 from enum import StrEnum
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 import httpx
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from sonosify._parsing import local_name, parse_headers
 from sonosify.client import DEFAULT_TIMEOUT, SonosClient
@@ -13,54 +16,16 @@ from sonosify.errors import DiscoveryError
 from sonosify.models import Group, Speaker
 from sonosify.topology import SonosSystem
 
-DEFAULT_DISCOVERY_TIMEOUT = 2.0
-
-_UUID_PREFIX = "uuid:"
-
-
-class DeviceTag(StrEnum):
-    DEVICE = "device"
-    ROOM_NAME = "roomName"
-    FRIENDLY_NAME = "friendlyName"
-    UDN = "UDN"
-
-
-class ZoneTag(StrEnum):
-    GROUP = "ZoneGroup"
-    MEMBER = "ZoneGroupMember"
-
-
-class ZoneAttr(StrEnum):
-    ID = "ID"
-    COORDINATOR = "Coordinator"
-    UUID = "UUID"
-    LOCATION = "Location"
-    ZONE_NAME = "ZoneName"
-    INVISIBLE = "Invisible"
-
-
-_SSDP_ADDRESS = ("239.255.255.250", 1900)
-_SONOS_ST = "urn:schemas-upnp-org:device:ZonePlayer:1"
-_SSDP_SEARCH_MESSAGE = "\r\n".join(
-    [
-        "M-SEARCH * HTTP/1.1",
-        f"HOST: {_SSDP_ADDRESS[0]}:{_SSDP_ADDRESS[1]}",
-        'MAN: "ssdp:discover"',
-        "MX: 1",
-        f"ST: {_SONOS_ST}",
-        "",
-        "",
-    ]
-).encode()
+_DEFAULT_DISCOVERY_TIMEOUT = 2.0
 
 
 async def discover(
     *,
     timeout: float = DEFAULT_TIMEOUT,
-    discovery_timeout: float = DEFAULT_DISCOVERY_TIMEOUT,
+    discovery_timeout: float = _DEFAULT_DISCOVERY_TIMEOUT,
     include_invisible: bool = False,
 ) -> SonosSystem:
-    locations = await _ssdp_locations(discovery_timeout)
+    locations = await asyncio.to_thread(_ssdp_locations, discovery_timeout)
     if not locations:
         raise DiscoveryError("no Sonos speakers discovered via SSDP")
 
@@ -91,30 +56,107 @@ async def discover(
     return SonosSystem(speakers, groups, timeout)
 
 
-async def _ssdp_locations(timeout: float) -> set[str]:
-    # Non-blocking UDP multicast driven by the running loop, so a cancelled
-    # discover() tears the socket down immediately instead of leaving a thread
-    # to run out its timeout. We keep an explicit deadline because SSDP replies
-    # trickle in one datagram at a time until the window closes.
-    loop = asyncio.get_running_loop()
-    locations: set[str] = set()
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as sock:
-        sock.setblocking(False)
-        await loop.sock_sendto(sock, _SSDP_SEARCH_MESSAGE, _SSDP_ADDRESS)
+_UUID_PREFIX = "uuid:"
 
-        deadline = loop.time() + timeout
-        while (remaining := deadline - loop.time()) > 0:
+
+class _DeviceTag(StrEnum):
+    DEVICE = "device"
+    ROOM_NAME = "roomName"
+    FRIENDLY_NAME = "friendlyName"
+    UDN = "UDN"
+
+
+class _ZoneTag(StrEnum):
+    GROUP = "ZoneGroup"
+    MEMBER = "ZoneGroupMember"
+
+
+class _ZoneGroupAttributes(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    id: str = Field(alias="ID", min_length=1)
+    coordinator_uid: str = Field(alias="Coordinator", min_length=1)
+
+
+class _ZoneGroupMemberAttributes(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    uid: str = Field(alias="UUID", min_length=1)
+    location: str = Field(alias="Location", min_length=1)
+    zone_name: str = Field("", alias="ZoneName")
+    invisible: bool = Field(False, alias="Invisible")
+
+
+_SSDP_ADDRESS = ("239.255.255.250", 1900)
+_SONOS_ST = "urn:schemas-upnp-org:device:ZonePlayer:1"
+_SSDP_SEARCH_MESSAGE = "\r\n".join(
+    [
+        "M-SEARCH * HTTP/1.1",
+        f"HOST: {_SSDP_ADDRESS[0]}:{_SSDP_ADDRESS[1]}",
+        'MAN: "ssdp:discover"',
+        "MX: 1",
+        f"ST: {_SONOS_ST}",
+        "",
+        "",
+    ]
+).encode()
+
+
+def _ssdp_locations(timeout: float) -> set[str]:
+    # Windows commonly prefers a virtual adapter for multicast. Send from every
+    # local IPv4 address and use one deadline so extra adapters add no latency.
+    locations: set[str] = set()
+    sockets: list[socket.socket] = []
+    try:
+        for address in _local_ipv4_addresses() or ("0.0.0.0",):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             try:
-                data, _ = await asyncio.wait_for(
-                    loop.sock_recvfrom(sock, 65535), remaining
-                )
-            except TimeoutError:
+                sock.bind((address, 0))
+                if address != "0.0.0.0":
+                    sock.setsockopt(
+                        socket.IPPROTO_IP,
+                        socket.IP_MULTICAST_IF,
+                        socket.inet_aton(address),
+                    )
+                sock.setblocking(False)
+                sock.sendto(_SSDP_SEARCH_MESSAGE, _SSDP_ADDRESS)
+            except OSError:
+                sock.close()
+                continue
+            sockets.append(sock)
+
+        deadline = time.monotonic() + timeout
+        while sockets and (remaining := deadline - time.monotonic()) > 0:
+            readable, _, _ = select.select(sockets, [], [], remaining)
+            if not readable:
                 break
-            _, headers = parse_headers(data.decode(errors="ignore"))
-            location = headers.get("location")
-            if location:
-                locations.add(location)
+            for sock in readable:
+                try:
+                    data, _ = sock.recvfrom(65535)
+                except BlockingIOError:
+                    continue
+                _, headers = parse_headers(data.decode(errors="ignore"))
+                location = headers.get("location")
+                if location:
+                    locations.add(location)
+    finally:
+        for sock in sockets:
+            sock.close()
     return locations
+
+
+def _local_ipv4_addresses() -> tuple[str, ...]:
+    try:
+        candidates = socket.getaddrinfo(
+            socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM
+        )
+    except OSError:
+        return ()
+    return tuple(
+        dict.fromkeys(
+            address[0] for *_, address in candidates if address[0] != "127.0.0.1"
+        )
+    )
 
 
 async def _speakers_from_locations(
@@ -143,11 +185,13 @@ async def _speaker_from_location(
 def _speaker_from_device_xml(location: str, xml_text: str) -> Speaker:
     parsed = urlparse(location)
     root = ElementTree.fromstring(xml_text)
-    device = _first(root, DeviceTag.DEVICE)
+    device = _first(root, _DeviceTag.DEVICE)
     if device is None:
         device = root
-    room = _text(device, DeviceTag.ROOM_NAME) or _text(device, DeviceTag.FRIENDLY_NAME)
-    uid = _text(device, DeviceTag.UDN).removeprefix(_UUID_PREFIX)
+    room = _text(device, _DeviceTag.ROOM_NAME) or _text(
+        device, _DeviceTag.FRIENDLY_NAME
+    )
+    uid = _text(device, _DeviceTag.UDN).removeprefix(_UUID_PREFIX)
     return Speaker(
         ip=parsed.hostname or "", port=parsed.port or 1400, room_name=room, uid=uid
     )
@@ -181,35 +225,39 @@ def _parse_topology(
 
     speakers: dict[str, Speaker] = {}
     groups: list[Group] = []
-    for zone_group in root.iter():
-        if local_name(zone_group.tag) != ZoneTag.GROUP:
-            continue
-        group_id = zone_group.attrib.get(ZoneAttr.ID, "")
-        coordinator_uid = zone_group.attrib.get(ZoneAttr.COORDINATOR, "")
-        members: list[Speaker] = []
-        for member in list(zone_group):
-            if local_name(member.tag) != ZoneTag.MEMBER:
+    try:
+        for zone_group in root.iter():
+            if local_name(zone_group.tag) != _ZoneTag.GROUP:
                 continue
-            uid = member.attrib.get(ZoneAttr.UUID, "")
-            location = member.attrib.get(ZoneAttr.LOCATION, "")
-            parsed = urlparse(location)
-            base = known.get(uid)
-            zone_name = member.attrib.get(ZoneAttr.ZONE_NAME, "")
-            speaker = Speaker(
-                ip=parsed.hostname or (base.ip if base else ""),
-                port=parsed.port or (base.port if base else 1400),
-                room_name=zone_name or (base.room_name if base else ""),
-                uid=uid,
-                zone_name=zone_name,
-                coordinator_uid=coordinator_uid,
-                is_coordinator=uid == coordinator_uid,
-                invisible=member.attrib.get(ZoneAttr.INVISIBLE, "0") == "1",
+            group_data = _ZoneGroupAttributes.model_validate(zone_group.attrib)
+            members: list[Speaker] = []
+            for member in list(zone_group):
+                if local_name(member.tag) != _ZoneTag.MEMBER:
+                    continue
+                member_data = _ZoneGroupMemberAttributes.model_validate(member.attrib)
+                parsed_location = urlparse(member_data.location)
+                base = known.get(member_data.uid)
+                speaker = Speaker(
+                    ip=parsed_location.hostname or (base.ip if base else ""),
+                    port=parsed_location.port or (base.port if base else 1400),
+                    room_name=member_data.zone_name or (base.room_name if base else ""),
+                    uid=member_data.uid,
+                    zone_name=member_data.zone_name,
+                    coordinator_uid=group_data.coordinator_uid,
+                    is_coordinator=member_data.uid == group_data.coordinator_uid,
+                    invisible=member_data.invisible,
+                )
+                speakers[member_data.uid] = speaker
+                members.append(speaker)
+            groups.append(
+                Group(
+                    id=group_data.id,
+                    coordinator_uid=group_data.coordinator_uid,
+                    members=tuple(members),
+                )
             )
-            speakers[uid or speaker.ip] = speaker
-            members.append(speaker)
-        groups.append(
-            Group(id=group_id, coordinator_uid=coordinator_uid, members=tuple(members))
-        )
+    except (ValidationError, ValueError):
+        return None
     return tuple(speakers.values()), tuple(groups)
 
 

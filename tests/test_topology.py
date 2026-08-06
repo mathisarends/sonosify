@@ -29,6 +29,12 @@ def test_system_finds_exact_and_fuzzy_room() -> None:
         system.speakers = ()  # type: ignore[misc]
 
 
+def test_system_exposes_configured_timeout() -> None:
+    system = SonosSystem((), (), timeout=3.5)
+
+    assert system.timeout == 3.5
+
+
 def test_system_reports_ambiguous_fuzzy_room() -> None:
     system = SonosSystem(
         (

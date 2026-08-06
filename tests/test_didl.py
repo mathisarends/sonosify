@@ -1,4 +1,9 @@
-from sonosify.didl import parse_favorites, parse_track_metadata, radio_metadata
+from sonosify.didl import (
+    parse_favorites,
+    parse_track_metadata,
+    radio_metadata,
+    radio_uri,
+)
 from sonosify.models import Favorite, Track
 
 
@@ -42,6 +47,34 @@ def test_parse_track_metadata_returns_bare_track_for_empty_or_invalid_input() ->
         uri="x", duration="1:00", position=1
     )
     assert parse_track_metadata("<not valid xml", uri="x") == Track(uri="x")
+
+
+def test_parse_track_metadata_falls_back_to_root_without_item_element() -> None:
+    didl = (
+        '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
+        "<dc:title>Direct</dc:title><res>x-sonos:direct</res></DIDL-Lite>"
+    )
+
+    track = parse_track_metadata(didl)
+
+    assert track.title == "Direct"
+    assert track.uri == "x-sonos:direct"
+
+
+def test_radio_uri_rewrites_http_and_https_schemes() -> None:
+    assert (
+        radio_uri("http://stream.example/radio")
+        == "x-rincon-mp3radio://stream.example/radio"
+    )
+    assert (
+        radio_uri("https://stream.example/radio")
+        == "x-rincon-mp3radio://stream.example/radio"
+    )
+
+
+def test_radio_uri_leaves_non_http_schemes_untouched() -> None:
+    assert radio_uri("x-sonosapi-stream:station") == "x-sonosapi-stream:station"
 
 
 def test_parse_favorites_collects_items_and_containers() -> None:

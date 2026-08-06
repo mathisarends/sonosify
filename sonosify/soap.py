@@ -12,7 +12,44 @@ _SOAP_ENV_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 logger = logging.getLogger(__name__)
 
 
-def build_envelope(
+async def soap_call(
+    client: httpx.AsyncClient,
+    endpoint_url: str,
+    service_urn: str,
+    action: str,
+    args: Mapping[str, object] | None = None,
+) -> dict[str, str]:
+    envelope = _build_envelope(service_urn, action, args)
+    logger.debug("-> POST %s %s#%s\n%s", endpoint_url, service_urn, action, envelope)
+    try:
+        response = await client.post(
+            endpoint_url,
+            content=envelope,
+            headers={
+                "Content-Type": 'text/xml; charset="utf-8"',
+                "SOAPACTION": f'"{service_urn}#{action}"',
+            },
+        )
+    except httpx.TimeoutException as exc:
+        raise NetworkError(f"request to {endpoint_url} timed out") from exc
+    except httpx.RequestError as exc:
+        raise NetworkError(f"request to {endpoint_url} failed: {exc}") from exc
+    logger.debug(
+        "<- %s %s#%s\n%s", response.status_code, service_urn, action, response.text
+    )
+    if response.status_code == httpx.codes.OK:
+        return _parse_response(response.content)
+
+    if response.status_code == httpx.codes.INTERNAL_SERVER_ERROR:
+        error = _parse_upnp_error(response.content)
+        if error is not None:
+            raise error
+
+    response.raise_for_status()
+    return {}
+
+
+def _build_envelope(
     service_urn: str, action: str, args: Mapping[str, object] | None = None
 ) -> str:
     body = [
@@ -28,7 +65,7 @@ def build_envelope(
     return "".join(body)
 
 
-def parse_response(raw: str | bytes) -> dict[str, str]:
+def _parse_response(raw: str | bytes) -> dict[str, str]:
     root = ElementTree.fromstring(raw)
     body = _find_by_local_name(root, "Body")
     if body is None or not list(body):
@@ -40,7 +77,7 @@ def parse_response(raw: str | bytes) -> dict[str, str]:
     }
 
 
-def parse_upnp_error(raw: str | bytes) -> UPnPError | None:
+def _parse_upnp_error(raw: str | bytes) -> UPnPError | None:
     try:
         root = ElementTree.fromstring(raw)
     except ElementTree.ParseError:
@@ -61,43 +98,6 @@ def parse_upnp_error(raw: str | bytes) -> UPnPError | None:
     if not code and not description:
         return None
     return UPnPError(code=code, description=description)
-
-
-async def soap_call(
-    client: httpx.AsyncClient,
-    endpoint_url: str,
-    service_urn: str,
-    action: str,
-    args: Mapping[str, object] | None = None,
-) -> dict[str, str]:
-    envelope = build_envelope(service_urn, action, args)
-    logger.debug("-> POST %s %s#%s\n%s", endpoint_url, service_urn, action, envelope)
-    try:
-        response = await client.post(
-            endpoint_url,
-            content=envelope,
-            headers={
-                "Content-Type": 'text/xml; charset="utf-8"',
-                "SOAPACTION": f'"{service_urn}#{action}"',
-            },
-        )
-    except httpx.TimeoutException as exc:
-        raise NetworkError(f"request to {endpoint_url} timed out") from exc
-    except httpx.RequestError as exc:
-        raise NetworkError(f"request to {endpoint_url} failed: {exc}") from exc
-    logger.debug(
-        "<- %s %s#%s\n%s", response.status_code, service_urn, action, response.text
-    )
-    if response.status_code == httpx.codes.OK:
-        return parse_response(response.content)
-
-    if response.status_code == httpx.codes.INTERNAL_SERVER_ERROR:
-        error = parse_upnp_error(response.content)
-        if error is not None:
-            raise error
-
-    response.raise_for_status()
-    return {}
 
 
 def _find_by_local_name(

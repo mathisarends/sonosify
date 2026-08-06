@@ -6,6 +6,7 @@ import pytest
 import sonosify.client as client_module
 from sonosify import Favorite, Speaker
 from sonosify.client import PositionInfo, SonosClient, TransportInfo
+from sonosify.errors import LocalAPIError, NetworkError
 from sonosify.events import EventSubscription
 
 
@@ -57,12 +58,34 @@ def test_context_manager_closes_owned_http_client() -> None:
     assert _run(run()) is True
 
 
+def test_close_closes_local_control_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    close_calls = 0
+
+    async def close(self: object) -> None:
+        nonlocal close_calls
+        close_calls += 1
+
+    monkeypatch.setattr(client_module._websocket.AudioClipWebSocket, "close", close)
+
+    async def run() -> None:
+        client = SonosClient("192.168.1.10")
+        await client.close()
+
+    asyncio.run(run())
+
+    assert close_calls == 1
+
+
 def test_play_audio_clip_sends_local_control_api_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[object, ...]] = []
 
-    async def send_command(*args: object, **kwargs: object) -> dict[str, object]:
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
         calls.append((*args, kwargs))
         return {
             "id": "clip-1",
@@ -72,7 +95,9 @@ def test_play_audio_clip_sends_local_control_api_command(
             "clipType": "VOICE_ASSISTANT",
         }
 
-    monkeypatch.setattr(client_module, "send_websocket_command", send_command)
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket, "send_command", send_command
+    )
     client = SonosClient("192.168.1.10", uid="RINCON_1", timeout=4.0)
 
     clip = _run(
@@ -89,7 +114,6 @@ def test_play_audio_clip_sends_local_control_api_command(
     assert clip.id == "clip-1"
     assert calls == [
         (
-            "192.168.1.10",
             {
                 "namespace": "audioClip:1",
                 "command": "loadAudioClip",
@@ -104,29 +128,136 @@ def test_play_audio_clip_sends_local_control_api_command(
                 "volume": 30,
                 "clipType": "VOICE_ASSISTANT",
             },
-            {"timeout": 4.0},
+            {},
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"name": ""}, "audio clip name"),
+        ({"app_id": ""}, "app_id"),
+        ({"volume": 101}, "audio clip volume"),
+        ({"stream_url": "not-a-url"}, "stream_url must be an absolute"),
+        ({"http_authorization": "x" * 513}, "http_authorization"),
+    ],
+)
+def test_play_audio_clip_validates_arguments(
+    kwargs: dict[str, object], match: str
+) -> None:
+    client = SonosClient("192.168.1.10")
+    base_kwargs: dict[str, object] = {"app_id": "com.example.agent", "name": "Agent"}
+    base_kwargs.update(kwargs)
+
+    with pytest.raises(ValueError, match=match):
+        _run(client.play_audio_clip(**base_kwargs))
+
+
+def test_play_audio_clip_includes_http_authorization_option(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
+        calls.append((*args, kwargs))
+        return {"id": "clip-1", "name": "Agent", "appId": "com.example.agent"}
+
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket, "send_command", send_command
+    )
+    client = SonosClient("192.168.1.10", uid="RINCON_1")
+
+    _run(
+        client.play_audio_clip(
+            app_id="com.example.agent", name="Agent", http_authorization="Bearer x"
+        )
+    )
+
+    assert calls[0][1]["httpAuthorization"] == "Bearer x"
+
+
+def test_cancel_audio_clip_rejects_empty_clip_id() -> None:
+    client = SonosClient("192.168.1.10", uid="RINCON_1")
+
+    with pytest.raises(ValueError, match="clip_id must not be empty"):
+        _run(client.cancel_audio_clip(""))
+
+
+def test_player_id_wraps_http_errors_as_network_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = SonosClient("192.168.1.10", http_client=http)
+            with pytest.raises(NetworkError, match="cannot read Sonos device identity"):
+                await client.cancel_audio_clip("clip-1")
+
+    asyncio.run(run())
+
+
+def test_player_id_wraps_unparseable_xml_as_local_api_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="not xml")
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = SonosClient("192.168.1.10", http_client=http)
+            with pytest.raises(LocalAPIError, match="invalid device metadata"):
+                await client.cancel_audio_clip("clip-1")
+
+    asyncio.run(run())
+
+
+def test_player_id_raises_when_udn_missing() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text=(
+                '<root xmlns="urn:schemas-upnp-org:device-1-0"><device></device></root>'
+            ),
+        )
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = SonosClient("192.168.1.10", http_client=http)
+            with pytest.raises(LocalAPIError, match="contains no UDN"):
+                await client.cancel_audio_clip("clip-1")
+
+    asyncio.run(run())
+
+
+def test_transport_info_coerces_non_string_state_to_none() -> None:
+    info = TransportInfo.model_validate({"CurrentTransportState": None})
+
+    assert info.state is None
 
 
 def test_cancel_audio_clip_sends_clip_id(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[object, ...]] = []
 
-    async def send_command(*args: object, **kwargs: object) -> dict[str, object]:
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
         calls.append((*args, kwargs))
         return {}
 
-    monkeypatch.setattr(client_module, "send_websocket_command", send_command)
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket, "send_command", send_command
+    )
     client = SonosClient("192.168.1.10", uid="RINCON_1")
 
     _run(client.cancel_audio_clip("clip-1"))
 
-    assert calls[0][1] == {
+    assert calls[0][0] == {
         "namespace": "audioClip:1",
         "command": "cancelAudioClip",
         "playerId": "RINCON_1",
     }
-    assert calls[0][2] == {"clipId": "clip-1"}
+    assert calls[0][1] == {"id": "clip-1"}
 
 
 def test_local_audio_clip_resolves_player_id_from_configured_ip(
@@ -145,7 +276,9 @@ def test_local_audio_clip_resolves_player_id_from_configured_ip(
             ),
         )
 
-    async def send_command(*args: object, **kwargs: object) -> dict[str, object]:
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
         calls.append((*args, kwargs))
         return {
             "id": "clip-1",
@@ -153,7 +286,9 @@ def test_local_audio_clip_resolves_player_id_from_configured_ip(
             "appId": "com.example.agent",
         }
 
-    monkeypatch.setattr(client_module, "send_websocket_command", send_command)
+    monkeypatch.setattr(
+        client_module._websocket.AudioClipWebSocket, "send_command", send_command
+    )
 
     async def run() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
@@ -163,7 +298,9 @@ def test_local_audio_clip_resolves_player_id_from_configured_ip(
 
     asyncio.run(run())
 
-    assert calls[0][1]["playerId"] == "RINCON_DIRECT"
+    command = calls[0][0]
+    assert isinstance(command, dict)
+    assert command["playerId"] == "RINCON_DIRECT"
 
 
 def test_close_leaves_externally_provided_http_client_open() -> None:
@@ -238,6 +375,32 @@ def test_shuffle_and_repeat_preserve_each_other(recorder: _RecordingSoap) -> Non
         "SHUFFLE_REPEAT_ONE",
         "SHUFFLE_NOREPEAT",
     ]
+
+
+def test_set_repeat_without_shuffle_uses_non_shuffled_play_modes(
+    recorder: _RecordingSoap,
+) -> None:
+    recorder._responses["GetTransportSettings"] = {"PlayMode": "NORMAL"}
+    client = SonosClient("192.168.1.10")
+
+    assert _run(client.set_repeat("one")) == "REPEAT_ONE"
+
+
+@pytest.mark.parametrize(
+    ("current_play_mode", "expected_mode"),
+    [
+        ("REPEAT_ALL", "SHUFFLE"),
+        ("SHUFFLE", "SHUFFLE"),
+        ("NORMAL", "SHUFFLE_NOREPEAT"),
+    ],
+)
+def test_set_shuffle_maps_every_current_repeat_state(
+    recorder: _RecordingSoap, current_play_mode: str, expected_mode: str
+) -> None:
+    recorder._responses["GetTransportSettings"] = {"PlayMode": current_play_mode}
+    client = SonosClient("192.168.1.10")
+
+    assert _run(client.set_shuffle(True)) == expected_mode
 
 
 def test_crossfade_get_and_set(recorder: _RecordingSoap) -> None:
@@ -341,40 +504,6 @@ def test_enqueue_uri_with_play_seeks_and_plays(recorder: _RecordingSoap) -> None
     assert position == 5
     actions = [call[2] for call in recorder.calls]
     assert actions == ["AddURIToQueue", "Seek", "Play"]
-
-
-def test_open_track_plays_immediately_when_not_enqueue_only(
-    recorder: _RecordingSoap,
-) -> None:
-    client = SonosClient("192.168.1.10")
-
-    position = _run(client.open_track("abc123", title="Focus", play=True))
-
-    assert position is None
-    actions = [call[2] for call in recorder.calls]
-    assert actions == ["SetAVTransportURI", "Play"]
-    assert "x-sonos-spotify" in recorder.calls[0][3]["CurrentURI"]
-
-
-def test_open_track_enqueues_when_not_playing(recorder: _RecordingSoap) -> None:
-    recorder._responses["AddURIToQueue"] = {"FirstTrackNumberEnqueued": "2"}
-    client = SonosClient("192.168.1.10")
-
-    position = _run(client.open_track("abc123", play=False))
-
-    assert position == 2
-    assert recorder.calls[0][2] == "AddURIToQueue"
-
-
-def test_open_track_next_flag_enqueues_even_when_play_requested(
-    recorder: _RecordingSoap,
-) -> None:
-    client = SonosClient("192.168.1.10")
-
-    _run(client.open_track("abc123", next_=True, play=True))
-
-    assert recorder.calls[0][2] == "AddURIToQueue"
-    assert recorder.calls[0][3]["EnqueueAsNext"] == "1"
 
 
 def test_line_in_uses_explicit_speaker_source(recorder: _RecordingSoap) -> None:

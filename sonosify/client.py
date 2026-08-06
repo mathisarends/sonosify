@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from enum import StrEnum
 from typing import Self
 from urllib.parse import urlparse
@@ -8,9 +9,9 @@ from xml.etree import ElementTree
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+import sonosify._websocket as _websocket
 from sonosify._parsing import int_or_none, local_name
-from sonosify._websocket import send_websocket_command
-from sonosify.cloud.models import (
+from sonosify.audio_clip import (
     AudioClip,
     ClipLEDBehavior,
     ClipPriority,
@@ -23,11 +24,14 @@ from sonosify.didl import (
     radio_uri,
 )
 from sonosify.errors import LocalAPIError, NetworkError
-from sonosify.events import EventService, EventSubscription, TransportState
-from sonosify.events.models import DEFAULT_SERVICES
+from sonosify.events import (
+    DEFAULT_SERVICES,
+    EventService,
+    EventSubscription,
+    TransportState,
+)
 from sonosify.models import Favorite, PlaybackState, Speaker, Track
 from sonosify.soap import soap_call
-from sonosify.spotify import parse_track_id, track_metadata
 
 DEFAULT_TIMEOUT = 15.0
 
@@ -38,53 +42,7 @@ _DEVICE_PROPERTIES = "urn:schemas-upnp-org:service:DeviceProperties:1"
 _ZONE_GROUP_TOPOLOGY = "urn:schemas-upnp-org:service:ZoneGroupTopology:1"
 
 
-class RepeatMode(StrEnum):
-    OFF = "off"
-    ONE = "one"
-    ALL = "all"
-
-
-class TransportInfo(BaseModel):
-    """Typed view of the AVTransport GetTransportInfo response."""
-
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-
-    state: TransportState | None = Field(None, alias="CurrentTransportState")
-    status: str = Field("", alias="CurrentTransportStatus")
-    speed: str = Field("", alias="CurrentSpeed")
-
-    @field_validator("state", mode="before")
-    @classmethod
-    def _coerce_state(cls, value: object) -> object:
-        if not isinstance(value, str):
-            return value
-        try:
-            return TransportState(value)
-        except ValueError:
-            return None
-
-
-class PositionInfo(BaseModel):
-    """Typed view of the AVTransport GetPositionInfo response."""
-
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-
-    track: int | None = Field(None, alias="Track")
-    track_uri: str = Field("", alias="TrackURI")
-    track_duration: str = Field("", alias="TrackDuration")
-    track_metadata: str = Field("", alias="TrackMetaData")
-    relative_time: str = Field("", alias="RelTime")
-    absolute_time: str = Field("", alias="AbsTime")
-
-    @field_validator("track", mode="before")
-    @classmethod
-    def _coerce_track(cls, value: object) -> object:
-        return int_or_none(value) if isinstance(value, str) else value
-
-
 class SonosClient:
-    __slots__ = ("_http", "_ip", "_owns_client", "_port", "_timeout", "_uid")
-
     def __init__(
         self,
         ip: str,
@@ -97,9 +55,9 @@ class SonosClient:
         self._ip = ip
         self._port = port
         self._uid = uid
-        self._timeout = timeout
         self._owns_client = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=timeout)
+        self._audio_clip_websocket = _websocket.AudioClipWebSocket(ip, timeout=timeout)
 
     @classmethod
     def from_speaker(
@@ -124,10 +82,11 @@ class SonosClient:
         return self._uid
 
     async def close(self) -> None:
+        await self._audio_clip_websocket.close()
         if self._owns_client:
             await self._http.aclose()
 
-    async def __aenter__(self) -> SonosClient:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -174,15 +133,13 @@ class SonosClient:
             options["httpAuthorization"] = http_authorization
 
         player_id = await self._player_id()
-        result = await send_websocket_command(
-            self._ip,
+        result = await self._audio_clip_websocket.send_command(
             {
                 "namespace": "audioClip:1",
                 "command": "loadAudioClip",
                 "playerId": player_id,
             },
             options,
-            timeout=self._timeout,
         )
         return AudioClip.model_validate(result)
 
@@ -190,15 +147,13 @@ class SonosClient:
         if not clip_id:
             raise ValueError("clip_id must not be empty")
         player_id = await self._player_id()
-        await send_websocket_command(
-            self._ip,
+        await self._audio_clip_websocket.send_command(
             {
                 "namespace": "audioClip:1",
                 "command": "cancelAudioClip",
                 "playerId": player_id,
             },
-            {"clipId": clip_id},
-            timeout=self._timeout,
+            {"id": clip_id},
         )
 
     async def _player_id(self) -> str:
@@ -255,15 +210,15 @@ class SonosClient:
 
     async def set_shuffle(self, enabled: bool) -> str:
         current = await self.get_play_mode()
-        repeat = self._repeat_from_play_mode(current)
-        mode = self._play_mode(enabled, repeat)
+        repeat = _repeat_from_play_mode(current)
+        mode = _play_mode(enabled, repeat)
         await self.set_play_mode(mode)
         return mode
 
-    async def set_repeat(self, repeat: RepeatMode | str) -> str:
-        repeat = RepeatMode(repeat)
+    async def set_repeat(self, repeat: _RepeatMode | str) -> str:
+        repeat = _RepeatMode(repeat)
         current = await self.get_play_mode()
-        mode = self._play_mode(current.startswith("SHUFFLE"), repeat)
+        mode = _play_mode(current.startswith("SHUFFLE"), repeat)
         await self.set_play_mode(mode)
         return mode
 
@@ -325,20 +280,6 @@ class SonosClient:
             await self.seek_queue(position)
             await self.play()
         return position
-
-    async def open_track(
-        self, value: str, *, title: str = "", next_: bool = False, play: bool = False
-    ) -> int | None:
-        track = parse_track_id(value)
-        if play and not next_:
-            await self.play_uri(track.sonos_uri, title=title or track.uri)
-            return None
-        return await self.enqueue_uri(
-            track.sonos_uri,
-            metadata=track_metadata(track, title),
-            next_=next_,
-            play=play,
-        )
 
     async def line_in(self, source: Speaker | str | None = None) -> None:
         source_uid = self._source_uid(source)
@@ -481,7 +422,7 @@ class SonosClient:
     def watch(
         self,
         *,
-        services: tuple[str | EventService, ...] = DEFAULT_SERVICES,
+        services: Sequence[str | EventService] = DEFAULT_SERVICES,
         callback_host: str | None = None,
         callback_port: int = 0,
         timeout_seconds: int = 300,
@@ -560,24 +501,68 @@ class SonosClient:
             return self._uid
         raise ValueError("line-in playback requires a source Speaker or RINCON uid")
 
-    @staticmethod
-    def _repeat_from_play_mode(mode: str) -> RepeatMode:
-        if mode.endswith("REPEAT_ONE"):
-            return RepeatMode.ONE
-        if mode in {"REPEAT_ALL", "SHUFFLE"}:
-            return RepeatMode.ALL
-        return RepeatMode.OFF
 
-    @staticmethod
-    def _play_mode(shuffle: bool, repeat: RepeatMode) -> str:
-        if shuffle:
-            return {
-                RepeatMode.OFF: "SHUFFLE_NOREPEAT",
-                RepeatMode.ONE: "SHUFFLE_REPEAT_ONE",
-                RepeatMode.ALL: "SHUFFLE",
-            }[repeat]
+class TransportInfo(BaseModel):
+    """Typed view of the AVTransport GetTransportInfo response."""
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    state: TransportState | None = Field(None, alias="CurrentTransportState")
+    status: str = Field("", alias="CurrentTransportStatus")
+    speed: str = Field("", alias="CurrentSpeed")
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def _coerce_state(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        try:
+            return TransportState(value)
+        except ValueError:
+            return None
+
+
+class PositionInfo(BaseModel):
+    """Typed view of the AVTransport GetPositionInfo response."""
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    track: int | None = Field(None, alias="Track")
+    track_uri: str = Field("", alias="TrackURI")
+    track_duration: str = Field("", alias="TrackDuration")
+    track_metadata: str = Field("", alias="TrackMetaData")
+    relative_time: str = Field("", alias="RelTime")
+    absolute_time: str = Field("", alias="AbsTime")
+
+    @field_validator("track", mode="before")
+    @classmethod
+    def _coerce_track(cls, value: object) -> object:
+        return int_or_none(value) if isinstance(value, str) else value
+
+
+class _RepeatMode(StrEnum):
+    OFF = "off"
+    ONE = "one"
+    ALL = "all"
+
+
+def _repeat_from_play_mode(mode: str) -> _RepeatMode:
+    if mode.endswith("REPEAT_ONE"):
+        return _RepeatMode.ONE
+    if mode in {"REPEAT_ALL", "SHUFFLE"}:
+        return _RepeatMode.ALL
+    return _RepeatMode.OFF
+
+
+def _play_mode(shuffle: bool, repeat: _RepeatMode) -> str:
+    if shuffle:
         return {
-            RepeatMode.OFF: "NORMAL",
-            RepeatMode.ONE: "REPEAT_ONE",
-            RepeatMode.ALL: "REPEAT_ALL",
+            _RepeatMode.OFF: "SHUFFLE_NOREPEAT",
+            _RepeatMode.ONE: "SHUFFLE_REPEAT_ONE",
+            _RepeatMode.ALL: "SHUFFLE",
         }[repeat]
+    return {
+        _RepeatMode.OFF: "NORMAL",
+        _RepeatMode.ONE: "REPEAT_ONE",
+        _RepeatMode.ALL: "REPEAT_ALL",
+    }[repeat]
