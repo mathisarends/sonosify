@@ -3,14 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 import ssl
-from collections.abc import Mapping
 from typing import Any
 
 import pytest
 from websockets.protocol import State
 
-import sonosify._websocket as websocket_module
-from sonosify._websocket import AudioClipWebSocket
+import sonosify._clip.websocket as websocket_module
+from sonosify._clip.models import AudioClip
+from sonosify._clip.websocket import AudioClipWebSocket
 from sonosify.errors import LocalAPIError, NetworkError
 
 
@@ -243,7 +243,7 @@ def test_websocket_transport_routes_audio_clip_status_events(
 
     monkeypatch.setattr(websocket_module, "connect", connect)
 
-    async def run() -> Mapping[str, Any]:
+    async def run() -> AudioClip:
         transport = AudioClipWebSocket("192.168.1.10", timeout=3.0)
         await transport.subscribe_audio_clips("RINCON_1")
         await transport.send_command({"command": "loadAudioClip"})
@@ -258,7 +258,7 @@ def test_websocket_transport_routes_audio_clip_status_events(
 
     result = asyncio.run(run())
 
-    assert result["status"] == "DONE"
+    assert result.status == "DONE"
     assert json.loads(connection.sent[0])[0]["command"] == "subscribe"
 
 
@@ -298,7 +298,7 @@ def test_websocket_transport_accepts_event_before_command_response(
 
     monkeypatch.setattr(websocket_module, "connect", connect)
 
-    async def run() -> tuple[dict[str, Any], Mapping[str, Any]]:
+    async def run() -> tuple[dict[str, Any], AudioClip]:
         transport = AudioClipWebSocket("192.168.1.10", timeout=3.0)
         response = await transport.send_command({"command": "loadAudioClip"})
         event = await transport.wait_for_audio_clip("clip-1", timeout=1.0)
@@ -308,4 +308,4 @@ def test_websocket_transport_accepts_event_before_command_response(
     response, event = asyncio.run(run())
 
     assert response == {"id": "clip-1"}
-    assert event["status"] == "DONE"
+    assert event.status == "DONE"

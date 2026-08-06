@@ -10,16 +10,17 @@ from xml.etree import ElementTree
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-import sonosify._websocket as _websocket
-from sonosify._clip_server import AudioClipServer, _local_ip_for
-from sonosify._hosted_clip import HostedAudioClip
-from sonosify._parsing import int_or_none, local_name
-from sonosify.audio_clip import (
+from sonosify._clip import (
     AudioClip,
+    AudioClipServer,
+    AudioClipWebSocket,
     ClipLEDBehavior,
     ClipPriority,
     ClipType,
+    HostedAudioClip,
+    _local_ip_for,
 )
+from sonosify._parsing import int_or_none, local_name
 from sonosify.didl import (
     parse_favorites,
     parse_track_metadata,
@@ -60,7 +61,7 @@ class SonosClient:
         self._uid = uid
         self._owns_client = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=timeout)
-        self._audio_clip_websocket = _websocket.AudioClipWebSocket(ip, timeout=timeout)
+        self._audio_clip_websocket = AudioClipWebSocket(ip, timeout=timeout)
         self._audio_clip_server: AudioClipServer | None = None
 
     @classmethod

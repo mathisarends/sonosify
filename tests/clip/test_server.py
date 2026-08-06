@@ -2,7 +2,7 @@ import asyncio
 
 import httpx
 
-from sonosify._clip_server import AudioClipServer
+from sonosify._clip.server import AudioClipServer
 
 
 def test_clip_server_serves_audio_and_marks_it_fetched() -> None:

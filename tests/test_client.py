@@ -67,7 +67,7 @@ def test_close_closes_local_control_connection(
         nonlocal close_calls
         close_calls += 1
 
-    monkeypatch.setattr(client_module._websocket.AudioClipWebSocket, "close", close)
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "close", close)
 
     async def run() -> None:
         client = SonosClient("192.168.1.10")
@@ -95,9 +95,7 @@ def test_play_audio_clip_sends_local_control_api_command(
             "clipType": "VOICE_ASSISTANT",
         }
 
-    monkeypatch.setattr(
-        client_module._websocket.AudioClipWebSocket, "send_command", send_command
-    )
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
     client = SonosClient("192.168.1.10", uid="RINCON_1", timeout=4.0)
 
     clip = _run(
@@ -165,9 +163,7 @@ def test_play_audio_clip_includes_http_authorization_option(
         calls.append((*args, kwargs))
         return {"id": "clip-1", "name": "Agent", "appId": "com.example.agent"}
 
-    monkeypatch.setattr(
-        client_module._websocket.AudioClipWebSocket, "send_command", send_command
-    )
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
     client = SonosClient("192.168.1.10", uid="RINCON_1")
 
     _run(
@@ -231,15 +227,13 @@ def test_play_audio_clip_data_hosts_audio_and_waits_for_done(
     monkeypatch.setattr(client_module, "AudioClipServer", lambda: server)
     monkeypatch.setattr(client_module, "_local_ip_for", lambda ip: "192.168.1.20")
     monkeypatch.setattr(
-        client_module._websocket.AudioClipWebSocket,
+        client_module.AudioClipWebSocket,
         "subscribe_audio_clips",
         subscribe,
     )
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
     monkeypatch.setattr(
-        client_module._websocket.AudioClipWebSocket, "send_command", send_command
-    )
-    monkeypatch.setattr(
-        client_module._websocket.AudioClipWebSocket,
+        client_module.AudioClipWebSocket,
         "wait_for_audio_clip",
         wait_for_audio_clip,
     )
@@ -353,9 +347,7 @@ def test_cancel_audio_clip_sends_clip_id(monkeypatch: pytest.MonkeyPatch) -> Non
         calls.append((*args, kwargs))
         return {}
 
-    monkeypatch.setattr(
-        client_module._websocket.AudioClipWebSocket, "send_command", send_command
-    )
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
     client = SonosClient("192.168.1.10", uid="RINCON_1")
 
     _run(client.cancel_audio_clip("clip-1"))
@@ -394,9 +386,7 @@ def test_local_audio_clip_resolves_player_id_from_configured_ip(
             "appId": "com.example.agent",
         }
 
-    monkeypatch.setattr(
-        client_module._websocket.AudioClipWebSocket, "send_command", send_command
-    )
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
 
     async def run() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
@@ -431,9 +421,7 @@ def test_player_id_is_fetched_once_and_cached(monkeypatch: pytest.MonkeyPatch) -
     ) -> dict[str, object]:
         return {}
 
-    monkeypatch.setattr(
-        client_module._websocket.AudioClipWebSocket, "send_command", send_command
-    )
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
 
     async def run() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:

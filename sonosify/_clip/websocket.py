@@ -4,13 +4,15 @@ import asyncio
 import json
 import ssl
 from collections.abc import Mapping
-from typing import Any, Literal, Required, TypedDict, TypeGuard, cast
+from typing import Any, cast
 
+from pydantic import BaseModel, ConfigDict, ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import WebSocketException
 from websockets.protocol import State
 from websockets.typing import Subprotocol
 
+from sonosify._clip.models import AudioClip
 from sonosify.errors import LocalAPIError, NetworkError
 
 # The LAN handshake requires this header but doesn't authenticate its value.
@@ -20,38 +22,15 @@ _SUBPROTOCOL = Subprotocol("v1.api.smartspeaker.audio")
 _TERMINAL_CLIP_STATES = {"DISMISSED", "DONE", "ERROR", "INTERRUPTED"}
 _MAX_CACHED_CLIP_STATES = 128
 
-type _AudioClipPriority = Literal["LOW", "HIGH"]
-type _AudioClipType = Literal["CHIME", "CUSTOM", "VOICE_ASSISTANT"]
-type _AudioClipStatus = Literal[
-    "PENDING",
-    "ACTIVE",
-    "INACTIVE",
-    "DONE",
-    "DISMISSED",
-    "ERROR",
-    "INTERRUPTED",
-]
 type _JsonObject = dict[str, Any]
 
 
-class _MessageHeader(TypedDict, total=False):
-    namespace: str
-    type: str
-    success: bool
+class _MessageHeader(BaseModel):
+    model_config = ConfigDict(extra="allow", strict=True)
 
-
-class _AudioClipState(TypedDict, total=False):
-    id: Required[str]
-    name: Required[str]
-    appId: Required[str]
-    priority: _AudioClipPriority
-    clipType: _AudioClipType
-    status: Required[_AudioClipStatus]
-    errorCode: str
-
-
-class _AudioClipStatusBody(TypedDict):
-    audioClips: list[_AudioClipState]
+    namespace: str | None = None
+    type: str | None = None
+    success: bool | None = None
 
 
 class AudioClipWebSocket:
@@ -63,8 +42,8 @@ class AudioClipWebSocket:
         self._pending_response: asyncio.Future[_JsonObject] | None = None
         self._command_lock = asyncio.Lock()
         self._audio_clip_subscribed = False
-        self._clip_states: dict[str, _AudioClipState] = {}
-        self._clip_waiters: dict[str, set[asyncio.Future[_AudioClipState]]] = {}
+        self._clip_states: dict[str, AudioClip] = {}
+        self._clip_waiters: dict[str, set[asyncio.Future[AudioClip]]] = {}
 
     async def send_command(
         self,
@@ -105,17 +84,14 @@ class AudioClipWebSocket:
 
     async def wait_for_audio_clip(
         self, clip_id: str, *, timeout: float | None = None
-    ) -> _AudioClipState:
+    ) -> AudioClip:
         async with asyncio.timeout(timeout):
             while True:
                 current = self._clip_states.get(clip_id)
-                if (
-                    current is not None
-                    and current.get("status") in _TERMINAL_CLIP_STATES
-                ):
+                if current is not None and current.status in _TERMINAL_CLIP_STATES:
                     return current
 
-                waiter: asyncio.Future[_AudioClipState] = (
+                waiter: asyncio.Future[AudioClip] = (
                     asyncio.get_running_loop().create_future()
                 )
                 self._clip_waiters.setdefault(clip_id, set()).add(waiter)
@@ -127,7 +103,7 @@ class AudioClipWebSocket:
                         waiters.discard(waiter)
                         if not waiters:
                             self._clip_waiters.pop(clip_id, None)
-                if update.get("status") in _TERMINAL_CLIP_STATES:
+                if update.status in _TERMINAL_CLIP_STATES:
                     return update
 
     async def close(self) -> None:
@@ -173,7 +149,7 @@ class AudioClipWebSocket:
         try:
             while True:
                 header, body = _parse_message(await connection.recv())
-                if "success" in header:
+                if header.success is not None:
                     self._resolve_response(header, body)
                 else:
                     self._dispatch_event(header, body)
@@ -194,25 +170,30 @@ class AudioClipWebSocket:
         response = self._pending_response
         if response is None or response.done():
             return
-        if header.get("success", False):
+        if header.success:
             response.set_result(body)
         else:
-            response.set_exception(LocalAPIError.from_response(dict(header), body))
+            response.set_exception(
+                LocalAPIError.from_response(header.model_dump(exclude_none=True), body)
+            )
 
     def _dispatch_event(self, header: _MessageHeader, body: _JsonObject) -> None:
-        if header.get("type") != "audioClipStatus":
+        if header.type != "audioClipStatus":
             return
-        event = _parse_audio_clip_status(body)
-        if event is None:
+        values = body.get("audioClips")
+        if not isinstance(values, list):
             return
-        for value in event["audioClips"]:
-            clip_id = value["id"]
-            self._clip_states[clip_id] = value
+        for raw_clip in values:
+            try:
+                clip = AudioClip.model_validate(raw_clip)
+            except ValidationError:
+                continue
+            self._clip_states[clip.id] = clip
             if len(self._clip_states) > _MAX_CACHED_CLIP_STATES:
                 self._clip_states.pop(next(iter(self._clip_states)))
-            for waiter in self._clip_waiters.get(clip_id, ()):
+            for waiter in self._clip_waiters.get(clip.id, ()):
                 if not waiter.done():
-                    waiter.set_result(value)
+                    waiter.set_result(clip)
 
     def _fail_pending(self, error: Exception) -> None:
         if self._pending_response is not None and not self._pending_response.done():
@@ -238,49 +219,13 @@ def _parse_message(raw_message: str | bytes) -> tuple[_MessageHeader, _JsonObjec
         message = json.loads(raw_message)
     except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise LocalAPIError("player returned an invalid WebSocket response") from exc
-    if (
-        not isinstance(message, list)
-        or len(message) != 2
-        or not all(isinstance(item, dict) for item in message)
-    ):
+    if not isinstance(message, list) or len(message) != 2:
         raise LocalAPIError("player returned an invalid WebSocket response")
-    header, body = message
-    if (
-        ("success" in header and not isinstance(header["success"], bool))
-        or ("namespace" in header and not isinstance(header["namespace"], str))
-        or ("type" in header and not isinstance(header["type"], str))
-    ):
+    raw_header, body = message
+    if not isinstance(body, dict):
         raise LocalAPIError("player returned an invalid WebSocket response")
-    return cast(_MessageHeader, header), cast(_JsonObject, body)
-
-
-def _parse_audio_clip_status(body: _JsonObject) -> _AudioClipStatusBody | None:
-    values = body.get("audioClips")
-    if not isinstance(values, list):
-        return None
-    return {"audioClips": [value for value in values if _is_audio_clip_state(value)]}
-
-
-def _is_audio_clip_state(value: object) -> TypeGuard[_AudioClipState]:
-    if not isinstance(value, dict):
-        return False
-    required_string_fields = ("id", "name", "appId", "status")
-    if not all(isinstance(value.get(key), str) for key in required_string_fields):
-        return False
-    string_fields = ("errorCode",)
-    if any(key in value and not isinstance(value[key], str) for key in string_fields):
-        return False
-    return (
-        value.get("priority", "LOW") in ("LOW", "HIGH")
-        and value.get("clipType", "CHIME") in ("CHIME", "CUSTOM", "VOICE_ASSISTANT")
-        and value["status"]
-        in (
-            "PENDING",
-            "ACTIVE",
-            "INACTIVE",
-            "DONE",
-            "DISMISSED",
-            "ERROR",
-            "INTERRUPTED",
-        )
-    )
+    try:
+        header = _MessageHeader.model_validate(raw_header)
+    except ValidationError as exc:
+        raise LocalAPIError("player returned an invalid WebSocket response") from exc
+    return header, cast(_JsonObject, body)
