@@ -24,6 +24,8 @@ from sonosify.events.models import (
     ServerConnectionManagerEvent as ServerConnectionManagerEvent,
 )
 from sonosify.events.models import SonosEvent as SonosEvent
+from sonosify.events.models import SubscriptionLost as SubscriptionLost
+from sonosify.events.models import SubscriptionRestored as SubscriptionRestored
 from sonosify.events.models import SystemPropertiesEvent as SystemPropertiesEvent
 from sonosify.events.models import TransportState as TransportState
 from sonosify.events.models import UnknownSonosEvent as UnknownSonosEvent

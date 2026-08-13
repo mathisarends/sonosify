@@ -134,6 +134,31 @@ class UnknownSonosEvent(SonosEvent):
     """Fallback for a service this library does not model."""
 
 
+class SubscriptionLost(SonosEvent):
+    """The player stopped accepting renewals for ``affected_services``.
+
+    Emitted by the subscription itself rather than by the player: UPnP has no
+    disconnect notification, so a speaker that reboots or leaves the network
+    would otherwise just go quiet. The subscription keeps retrying and follows
+    up with `SubscriptionRestored`.
+    """
+
+    service: Literal["subscription_lost"] = "subscription_lost"
+    affected_services: tuple[EventService, ...] = ()
+    error: str = ""
+
+
+class SubscriptionRestored(SonosEvent):
+    """Renewal succeeded again for every service after a `SubscriptionLost`.
+
+    Events emitted while the player was unreachable are lost for good; treat
+    this as a cue to re-read the state you care about.
+    """
+
+    service: Literal["subscription_restored"] = "subscription_restored"
+    affected_services: tuple[EventService, ...] = ()
+
+
 class AlarmClockEvent(SonosEvent):
     event_path: ClassVar[str] = "/AlarmClock/Event"
 

@@ -1,4 +1,7 @@
 import asyncio
+import logging
+
+import pytest
 
 from sonosify.events import (
     AVTransportEvent,
@@ -86,6 +89,52 @@ def test_handlers_run_in_registration_order() -> None:
     _dispatch(router, AVTransportEvent())
 
     assert order == ["first", "second"]
+
+
+def test_failing_handler_does_not_stop_the_remaining_handlers() -> None:
+    router = EventRouter()
+    seen: list[str] = []
+
+    @router.on()
+    def broken(event: SonosEvent) -> None:
+        raise RuntimeError("boom")
+
+    @router.on()
+    async def broken_async(event: SonosEvent) -> None:
+        raise RuntimeError("boom async")
+
+    @router.on()
+    def survivor(event: SonosEvent) -> None:
+        seen.append(event.service)
+
+    _dispatch(router, AVTransportEvent(), RenderingControlEvent())
+
+    assert seen == ["av_transport", "rendering_control"]
+
+
+def test_failing_handler_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    router = EventRouter()
+
+    @router.on()
+    def broken(event: SonosEvent) -> None:
+        raise RuntimeError("boom")
+
+    with caplog.at_level(logging.ERROR, logger="sonosify.events"):
+        _dispatch(router, AVTransportEvent())
+
+    assert "broken" in caplog.text
+    assert "boom" in caplog.text
+
+
+def test_handler_cancellation_still_propagates() -> None:
+    router = EventRouter()
+
+    @router.on()
+    async def cancelled(event: SonosEvent) -> None:
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        _dispatch(router, AVTransportEvent())
 
 
 def test_decorator_returns_the_original_handler() -> None:

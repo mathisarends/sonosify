@@ -9,7 +9,14 @@ import pytest
 
 import sonosify.events.subscription as subscription_module
 from sonosify.errors import SubscriptionError
-from sonosify.events import AVTransportEvent, EventService, EventSubscription
+from sonosify.events import (
+    AVTransportEvent,
+    EventService,
+    EventSubscription,
+    SonosEvent,
+    SubscriptionLost,
+    SubscriptionRestored,
+)
 
 
 class _FakeHttpClient:
@@ -19,6 +26,7 @@ class _FakeHttpClient:
         self.requests: list[tuple[str, str, dict[str, str]]] = []
         self.renew_status = 200
         self.unimplemented: set[str] = set()
+        self.failure: Exception | None = None
         self._sid_counter = 0
 
     @property
@@ -32,6 +40,8 @@ class _FakeHttpClient:
         request = httpx.Request(method, url)
         if method != "SUBSCRIBE":
             return httpx.Response(200, request=request)
+        if self.failure is not None:
+            raise self.failure
         if any(path in url for path in self.unimplemented):
             raise httpx.HTTPStatusError(
                 "service unavailable",
@@ -63,8 +73,15 @@ def fake_http(monkeypatch: pytest.MonkeyPatch) -> _FakeHttpClient:
     return fake
 
 
-def _send_notify(port: int, *, sid: str, path: str, body: bytes) -> None:
-    async def send() -> None:
+@pytest.fixture
+def fast_renewals(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subscription_module, "_MIN_RENEW_INTERVAL", 0.01)
+    monkeypatch.setattr(subscription_module, "_RETRY_INTERVAL", 0.01)
+    monkeypatch.setattr(subscription_module, "_MAX_RETRY_INTERVAL", 0.02)
+
+
+def _send_notify(port: int, *, sid: str, path: str, body: bytes) -> bytes:
+    async def send() -> bytes:
         reader, writer = await asyncio.open_connection("127.0.0.1", port)
         request = (
             f"NOTIFY {path} HTTP/1.1\r\n"
@@ -74,11 +91,12 @@ def _send_notify(port: int, *, sid: str, path: str, body: bytes) -> None:
         ).encode() + body
         writer.write(request)
         await writer.drain()
-        await reader.read()
+        response = await reader.read()
         writer.close()
         await writer.wait_closed()
+        return response
 
-    asyncio.run(send())
+    return asyncio.run(send())
 
 
 def test_start_subscribes_to_each_configured_service(
@@ -398,6 +416,216 @@ def test_rejected_renewal_falls_back_to_a_fresh_subscription(
             return subscription._subscriptions[EventService.AV_TRANSPORT]  # noqa: SLF001
 
     assert asyncio.run(run()) == "uuid:sub-2"
+
+
+def test_renewal_loop_survives_transport_errors_and_recovers(
+    fake_http: _FakeHttpClient, fast_renewals: None
+) -> None:
+    """A speaker that drops off the network must be picked up again."""
+
+    async def run() -> tuple[bool, bool, int]:
+        async with EventSubscription(
+            "192.168.1.10", services=(EventService.AV_TRANSPORT,), timeout_seconds=0
+        ) as subscription:
+            await _until(lambda: bool(fake_http.renewals))
+            fake_http.failure = httpx.ConnectError("network is unreachable")
+            await _until(lambda: not subscription.connected)
+            lost = subscription.failing_services == (EventService.AV_TRANSPORT,)
+
+            attempts = len(fake_http.renewals)
+            await _until(lambda: len(fake_http.renewals) > attempts + 2)
+            still_retrying = not subscription._renewals.done()  # noqa: SLF001
+
+            fake_http.failure = None
+            await _until(lambda: subscription.connected)
+            return lost, still_retrying, len(fake_http.renewals)
+
+    lost, still_retrying, renewals = asyncio.run(run())
+
+    assert lost
+    assert still_retrying
+    assert renewals > 3
+
+
+def test_renewal_loop_survives_unexpected_errors(
+    fake_http: _FakeHttpClient, fast_renewals: None
+) -> None:
+    """Anything but cancellation: a dead task means a silent process forever."""
+
+    async def run() -> bool:
+        async with EventSubscription(
+            "192.168.1.10", services=(EventService.AV_TRANSPORT,), timeout_seconds=0
+        ) as subscription:
+            fake_http.failure = RuntimeError("something nobody expected")
+            await _until(lambda: not subscription.connected)
+            attempts = len(fake_http.renewals)
+            await _until(lambda: len(fake_http.renewals) > attempts + 2)
+            fake_http.failure = None
+            await _until(lambda: subscription.connected)
+            return not subscription._renewals.done()  # noqa: SLF001
+
+    assert asyncio.run(run()) is True
+
+
+def test_connection_loss_and_recovery_are_delivered_as_events(
+    fake_http: _FakeHttpClient, fast_renewals: None
+) -> None:
+    async def run() -> list[SonosEvent]:
+        seen: list[SonosEvent] = []
+        async with EventSubscription(
+            "192.168.1.10", services=(EventService.AV_TRANSPORT,), timeout_seconds=0
+        ) as subscription:
+
+            @subscription.on(SubscriptionLost, SubscriptionRestored)
+            def collect(event: SonosEvent) -> None:
+                seen.append(event)
+
+            dispatcher = asyncio.create_task(subscription.run())
+            fake_http.failure = httpx.ConnectError("network is unreachable")
+            await _until(lambda: bool(seen))
+            fake_http.failure = None
+            await _until(lambda: len(seen) > 1)
+            dispatcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await dispatcher
+        return seen
+
+    lost, restored, *rest = asyncio.run(run())
+
+    assert isinstance(lost, SubscriptionLost)
+    assert lost.affected_services == (EventService.AV_TRANSPORT,)
+    assert "network is unreachable" in lost.error
+    assert isinstance(restored, SubscriptionRestored)
+    assert restored.affected_services == (EventService.AV_TRANSPORT,)
+    assert rest == []
+
+
+def test_connection_loss_is_reported_once_per_outage(
+    fake_http: _FakeHttpClient, fast_renewals: None
+) -> None:
+    async def run() -> int:
+        async with EventSubscription(
+            "192.168.1.10", services=(EventService.AV_TRANSPORT,), timeout_seconds=0
+        ) as subscription:
+            fake_http.failure = httpx.ConnectError("network is unreachable")
+            await _until(lambda: not subscription.connected)
+            attempts = len(fake_http.renewals)
+            await _until(lambda: len(fake_http.renewals) > attempts + 3)
+            return subscription._events.qsize()  # noqa: SLF001
+
+    assert asyncio.run(run()) == 1
+
+
+def test_failing_handler_does_not_end_the_dispatch_loop(
+    fake_http: _FakeHttpClient,
+) -> None:
+    async def run() -> list[str]:
+        seen: list[str] = []
+        received = asyncio.Event()
+        async with EventSubscription(
+            "192.168.1.10", services=(EventService.AV_TRANSPORT,)
+        ) as subscription:
+
+            @subscription.on()
+            def broken(event: SonosEvent) -> None:
+                raise RuntimeError("boom")
+
+            @subscription.on()
+            def collect(event: SonosEvent) -> None:
+                seen.append(event.values.get("ZoneName", ""))
+                received.set()
+
+            dispatcher = asyncio.create_task(subscription.run())
+            path = next(iter(subscription._callback_paths))  # noqa: SLF001
+            port = subscription._server.sockets[0].getsockname()[1]  # noqa: SLF001
+            for room in ("Kitchen", "Bedroom"):
+                received.clear()
+                await asyncio.to_thread(
+                    _send_notify,
+                    port,
+                    sid="uuid:sub-1",
+                    path=path,
+                    body=_zone_name_body(room),
+                )
+                await asyncio.wait_for(received.wait(), timeout=2)
+            assert not dispatcher.done()
+            dispatcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await dispatcher
+        return seen
+
+    assert asyncio.run(run()) == ["Kitchen", "Bedroom"]
+
+
+def test_callback_server_survives_a_broken_request(fake_http: _FakeHttpClient) -> None:
+    """A truncated or aborted NOTIFY must not take the callback server down."""
+
+    async def send_broken(port: int) -> None:
+        _, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"NOTIFY /nope HTTP/1.1\r\nContent-Length: 400\r\n\r\nshort")
+        await writer.drain()
+        writer.close()
+        with contextlib.suppress(OSError):
+            await writer.wait_closed()
+
+    async def run() -> object:
+        async with EventSubscription(
+            "192.168.1.10", services=(EventService.AV_TRANSPORT,)
+        ) as subscription:
+            path = next(iter(subscription._callback_paths))  # noqa: SLF001
+            port = subscription._server.sockets[0].getsockname()[1]  # noqa: SLF001
+            await send_broken(port)
+            await asyncio.to_thread(
+                _send_notify,
+                port,
+                sid="uuid:sub-1",
+                path=path,
+                body=_zone_name_body("Kitchen"),
+            )
+            return await subscription.next_event(timeout=2)
+
+    event = asyncio.run(run())
+
+    assert event.values == {"ZoneName": "Kitchen"}
+
+
+def test_unparsable_notify_is_acknowledged_and_skipped(
+    fake_http: _FakeHttpClient,
+) -> None:
+    async def run() -> tuple[bytes, object]:
+        async with EventSubscription(
+            "192.168.1.10", services=(EventService.AV_TRANSPORT,)
+        ) as subscription:
+            path = next(iter(subscription._callback_paths))  # noqa: SLF001
+            port = subscription._server.sockets[0].getsockname()[1]  # noqa: SLF001
+            response = await asyncio.to_thread(
+                _send_notify,
+                port,
+                sid="uuid:sub-1",
+                path=path,
+                body=b"<not really xml",
+            )
+            await asyncio.to_thread(
+                _send_notify,
+                port,
+                sid="uuid:sub-1",
+                path=path,
+                body=_zone_name_body("Kitchen"),
+            )
+            return response, await subscription.next_event(timeout=2)
+
+    response, event = asyncio.run(run())
+
+    assert response.startswith(b"HTTP/1.1 200 OK")
+    assert event.values == {"ZoneName": "Kitchen"}
+
+
+def _zone_name_body(room: str) -> bytes:
+    return (
+        b'<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">'
+        b"<e:property><ZoneName>" + room.encode() + b"</ZoneName></e:property>"
+        b"</e:propertyset>"
+    )
 
 
 async def _until(condition: Callable[[], bool], *, timeout: float = 2.0) -> None:

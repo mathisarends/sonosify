@@ -1,10 +1,13 @@
 import inspect
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sonosify.events.models import SonosEvent
 
 type EventHandler[E: SonosEvent] = Callable[[E], Awaitable[None] | None]
+
+_logger = logging.getLogger("sonosify.events")
 
 
 class EventRouter:
@@ -36,6 +39,16 @@ class EventRouter:
         for selected, handler in self._handlers:
             if not isinstance(event, selected):
                 continue
-            result = handler(event)
-            if inspect.isawaitable(result):
-                await result
+            try:
+                result = handler(event)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                # A listener is meant to run for days: one broken handler must
+                # not end the dispatch loop, and the remaining handlers still
+                # need this event. Cancellation is a BaseException and passes.
+                _logger.exception(
+                    "event handler %s failed for %s event",
+                    getattr(handler, "__qualname__", handler),
+                    event.service,
+                )

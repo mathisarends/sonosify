@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import logging
 import socket
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
@@ -14,6 +15,8 @@ from sonosify.events.models import (
     DEFAULT_SERVICES,
     EventService,
     SonosEvent,
+    SubscriptionLost,
+    SubscriptionRestored,
     event_path,
     require_service,
 )
@@ -21,6 +24,10 @@ from sonosify.events.parsing import parse_notify_event
 from sonosify.events.router import EventHandler, EventRouter
 
 _MIN_RENEW_INTERVAL = 15.0
+_RETRY_INTERVAL = 5.0
+_MAX_RETRY_INTERVAL = 60.0
+
+_logger = logging.getLogger("sonosify.events")
 
 
 class EventSubscription:
@@ -49,6 +56,7 @@ class EventSubscription:
         self._subscriptions: dict[EventService, str] = {}
         self._callback_urls: dict[EventService, str] = {}
         self._callback_paths: dict[str, EventService] = {}
+        self._failures: dict[EventService, Exception] = {}
 
     @property
     def ip(self) -> str:
@@ -66,6 +74,15 @@ class EventSubscription:
     @property
     def subscribed_services(self) -> tuple[EventService, ...]:
         return tuple(self._subscriptions)
+
+    @property
+    def connected(self) -> bool:
+        """False from the first failed renewal until the player answers again."""
+        return self._server is not None and not self._failures
+
+    @property
+    def failing_services(self) -> tuple[EventService, ...]:
+        return tuple(self._failures)
 
     @property
     def callback_host(self) -> str | None:
@@ -162,6 +179,7 @@ class EventSubscription:
             with contextlib.suppress(httpx.HTTPError):
                 await self._unsubscribe(service, sid)
         self._subscriptions.clear()
+        self._failures.clear()
 
         if self._server is not None:
             self._server.close()
@@ -172,43 +190,99 @@ class EventSubscription:
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        # A half-open connection or a truncated request must cost one NOTIFY,
+        # not the callback server: asyncio drops the failing task either way,
+        # but an unhandled error here also loses the acknowledgement.
         try:
-            raw_headers = await reader.readuntil(b"\r\n\r\n")
-            request_line, headers = parse_headers(raw_headers.decode(errors="ignore"))
-            method, path, *_ = (*request_line.split(), "", "")
-            length = int(headers.get("content-length", "0"))
-            body = await reader.readexactly(length) if length else b""
-
-            if method.upper() != "NOTIFY":
-                writer.write(
-                    b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n"
-                )
-            else:
-                # A player that does not get its 200 back re-sends and eventually
-                # drops the subscription, so acknowledge even unusable payloads.
-                with contextlib.suppress(ElementTree.ParseError):
-                    await self._events.put(
-                        parse_notify_event(
-                            body,
-                            service=self._callback_paths.get(path, "unknown"),
-                            sid=headers.get("sid", ""),
-                            sequence=int_or_none(headers.get("seq")),
-                        )
-                    )
-                writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
-            await writer.drain()
+            await self._serve_notify(reader, writer)
+        except (OSError, EOFError, asyncio.IncompleteReadError) as error:
+            _logger.debug("callback connection from %s failed: %r", self._ip, error)
+        except asyncio.LimitOverrunError as error:
+            _logger.warning("oversized callback request headers: %r", error)
         finally:
             writer.close()
-            await writer.wait_closed()
+            with contextlib.suppress(OSError, asyncio.IncompleteReadError):
+                await writer.wait_closed()
+
+    async def _serve_notify(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        raw_headers = await reader.readuntil(b"\r\n\r\n")
+        request_line, headers = parse_headers(raw_headers.decode(errors="ignore"))
+        method, path, *_ = (*request_line.split(), "", "")
+        length = int_or_none(headers.get("content-length")) or 0
+        body = await reader.readexactly(length) if length > 0 else b""
+
+        if method.upper() != "NOTIFY":
+            writer.write(
+                b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n"
+            )
+        else:
+            # A player that does not get its 200 back re-sends and eventually
+            # drops the subscription, so acknowledge even unusable payloads.
+            try:
+                await self._events.put(
+                    parse_notify_event(
+                        body,
+                        service=self._callback_paths.get(path, "unknown"),
+                        sid=headers.get("sid", ""),
+                        sequence=int_or_none(headers.get("seq")),
+                    )
+                )
+            except (ElementTree.ParseError, ValueError) as error:
+                _logger.warning("unusable NOTIFY on %s: %r", path, error)
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+        await writer.drain()
 
     async def _renew_forever(self) -> None:
-        """UPnP subscriptions lapse after their TIMEOUT; refresh them at half-life."""
+        """UPnP subscriptions lapse after their TIMEOUT; refresh them at half-life.
+
+        Nothing short of cancellation may end this loop: once it stops, the
+        player forgets the subscription within one TIMEOUT and the process goes
+        silent forever. While a service is failing the loop retries with a
+        short backoff instead of waiting for the next half-life.
+        """
         interval = max(self._timeout_seconds / 2, _MIN_RENEW_INTERVAL)
+        delay = interval
+        retry = _RETRY_INTERVAL
         while True:
-            await asyncio.sleep(interval)
-            for service, sid in list(self._subscriptions.items()):
-                with contextlib.suppress(httpx.HTTPError):
-                    self._subscriptions[service] = await self._renew(service, sid)
+            await asyncio.sleep(delay)
+            if await self._renew_all():
+                delay = retry
+                retry = min(retry * 2, _MAX_RETRY_INTERVAL)
+            else:
+                delay = interval
+                retry = _RETRY_INTERVAL
+
+    async def _renew_all(self) -> dict[EventService, Exception]:
+        failures: dict[EventService, Exception] = {}
+        for service, sid in list(self._subscriptions.items()):
+            try:
+                self._subscriptions[service] = await self._renew(service, sid)
+            except Exception as error:  # noqa: BLE001
+                failures[service] = error
+        self._report_health(failures)
+        return failures
+
+    def _report_health(self, failures: dict[EventService, Exception]) -> None:
+        """Turn renewal outcomes into events, on transition only."""
+        previous, self._failures = self._failures, failures
+        if failures and set(failures) != set(previous):
+            error = next(iter(failures.values()))
+            _logger.warning(
+                "%s stopped renewing %s: %r",
+                self._ip,
+                ", ".join(failures),
+                error,
+            )
+            self._events.put_nowait(
+                SubscriptionLost(affected_services=tuple(failures), error=f"{error!r}")
+            )
+        elif previous and not failures:
+            _logger.info("%s renewed %s again", self._ip, ", ".join(previous))
+            self._events.put_nowait(
+                SubscriptionRestored(affected_services=tuple(previous))
+            )
 
     async def _subscribe(self, service: EventService) -> str:
         return await self._request(

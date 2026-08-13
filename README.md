@@ -398,9 +398,40 @@ the same `EventSubscription` for a client you already hold.
 | `events(*, timeout=None)` | Async iterator form of `next_event()` |
 | `await start()` / `await close()` | Manual lifecycle, if you are not using `async with` |
 | `services` / `subscribed_services` | The services you asked for, and the ones the player actually accepted |
+| `connected` / `failing_services` | Whether every subscription is currently being renewed, and which ones are not |
 
 Subscriptions are renewed automatically at half their `timeout_seconds`, so a
 watcher keeps running past the player's subscription lifetime.
+
+#### Staying up
+
+A watcher is meant to run for as long as your process does, so nothing short of
+cancellation ends it:
+
+- A handler that raises is logged to the `sonosify.events` logger; the remaining
+  handlers still see the event and dispatch continues.
+- A failed renewal — speaker rebooting, Wi-Fi gone, cable pulled — does not end
+  the renewal loop. It retries with a 5 s to 60 s backoff until the player
+  answers again, then re-subscribes and returns to the normal half-life rhythm.
+- UPnP has no disconnect notification, so the subscription raises none either:
+  it emits `SubscriptionLost` once per outage and `SubscriptionRestored` when
+  every service is renewing again. Both are ordinary events, so handle them like
+  any other. Events emitted while the player was unreachable are gone for good;
+  treat `SubscriptionRestored` as a cue to re-read the state you care about.
+
+```python
+@watcher.on(SubscriptionLost)
+def dropped(event: SubscriptionLost) -> None:
+    print("lost", event.affected_services, event.error)
+
+@watcher.on(SubscriptionRestored)
+async def back(event: SubscriptionRestored) -> None:
+    print("back", await sonos.now_playing("Kitchen"))
+```
+
+An outage is noticed on the next renewal, so within half of `timeout_seconds`
+(150 s by default). Pass a smaller `timeout_seconds` if you need to hear about
+it sooner.
 
 No player implements every service — a speaker answers `SUBSCRIBE` on the
 soundbar-only `HTControl` with `503`. Those services are skipped and listed in

@@ -15,6 +15,8 @@ from sonosify import (
     RenderingControlEvent,
     SonosController,
     SonosEvent,
+    SubscriptionLost,
+    SubscriptionRestored,
     ZoneGroupTopologyEvent,
 )
 
@@ -37,6 +39,14 @@ async def main() -> None:
         @watcher.on(QueueEvent, ZoneGroupTopologyEvent)
         async def topology(event: SonosEvent) -> None:
             print(event.service, "changed")
+
+        @watcher.on(SubscriptionLost)
+        def lost(event: SubscriptionLost) -> None:
+            print("lost", ", ".join(event.affected_services), event.error)
+
+        @watcher.on(SubscriptionRestored)
+        def restored(event: SubscriptionRestored) -> None:
+            print("restored", ", ".join(event.affected_services))
 
         @watcher.on()
         def everything(event: SonosEvent) -> None:

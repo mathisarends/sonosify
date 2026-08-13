@@ -37,6 +37,8 @@ from .events import RendererConnectionManagerEvent as RendererConnectionManagerE
 from .events import RenderingControlEvent as RenderingControlEvent
 from .events import ServerConnectionManagerEvent as ServerConnectionManagerEvent
 from .events import SonosEvent as SonosEvent
+from .events import SubscriptionLost as SubscriptionLost
+from .events import SubscriptionRestored as SubscriptionRestored
 from .events import SystemPropertiesEvent as SystemPropertiesEvent
 from .events import TransportState as TransportState
 from .events import UnknownSonosEvent as UnknownSonosEvent
