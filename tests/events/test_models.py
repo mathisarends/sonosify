@@ -10,6 +10,7 @@ from sonosify.events import (
     RenderingControlEvent,
     TransportState,
     UnknownSonosEvent,
+    ZoneGroupTopologyEvent,
 )
 from sonosify.events.models import (
     event_path,
@@ -37,6 +38,25 @@ def test_av_transport_event_parses_aliases_and_coerces() -> None:
     assert event.current_track == 3
     assert event.number_of_tracks == 12
     assert event.transport_actions == ("Play", "Pause", "Next")
+
+
+def test_event_alias_generator_preserves_upnp_initialisms() -> None:
+    event = ZoneGroupTopologyEvent.model_validate(
+        {
+            "ZoneGroupID": "group-id",
+            "ZonePlayerUUIDsInGroup": "player-1, player-2",
+            "AreasUpdateID": "update-id",
+        }
+    )
+
+    assert event.zone_group_id == "group-id"
+    assert event.zone_player_uuids_in_group == ("player-1", "player-2")
+    assert event.areas_update_id == "update-id"
+
+    serialized = event.model_dump(by_alias=True)
+    assert serialized["service"] is EventService.ZONE_GROUP_TOPOLOGY
+    assert serialized["ZoneGroupID"] == "group-id"
+    assert "Service" not in serialized
 
 
 def test_av_transport_event_is_lenient_on_garbage() -> None:

@@ -48,6 +48,42 @@ class PlayMode(StrEnum):
 type RawEventValues = dict[str, str]
 
 
+_UPNP_ALIAS_WORDS = {
+    "av": "AV",
+    "ht": "HT",
+    "id": "ID",
+    "ids": "IDs",
+    "idx": "IDX",
+    "ir": "IR",
+    "ssid": "SSID",
+    "tos": "TOS",
+    "uri": "URI",
+    "uuid": "UUID",
+    "uuids": "UUIDs",
+}
+_NON_UPNP_EVENT_FIELDS = frozenset(
+    {
+        "affected_services",
+        "enqueued_track",
+        "error",
+        "next_track",
+        "sequence",
+        "service",
+        "sid",
+        "track",
+        "values",
+    }
+)
+
+
+def _upnp_alias(name: str) -> str:
+    if name in _NON_UPNP_EVENT_FIELDS:
+        return name
+    return "".join(
+        _UPNP_ALIAS_WORDS.get(part, part.capitalize()) for part in name.split("_")
+    )
+
+
 class _TrackSource(NamedTuple):
     """Which LastChange variables a `Track`-typed field is assembled from."""
 
@@ -108,7 +144,12 @@ class SonosEvent(BaseModel):
     including variables that have no typed field.
     """
 
-    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="ignore")
+    model_config = ConfigDict(
+        frozen=True,
+        populate_by_name=True,
+        extra="ignore",
+        alias_generator=_upnp_alias,
+    )
 
     event_path: ClassVar[str] = ""
     track_sources: ClassVar[_TrackSources] = ()
@@ -163,25 +204,25 @@ class AlarmClockEvent(SonosEvent):
     event_path: ClassVar[str] = "/AlarmClock/Event"
 
     service: Literal[EventService.ALARM_CLOCK] = EventService.ALARM_CLOCK
-    alarm_list_version: str = Field("", alias="AlarmListVersion")
-    daily_index_refresh_time: str = Field("", alias="DailyIndexRefreshTime")
-    time_zone: str = Field("", alias="TimeZone")
-    time_server: str = Field("", alias="TimeServer")
-    time_generation: _Number = Field(None, alias="TimeGeneration")
-    time_format: str = Field("", alias="TimeFormat")
-    date_format: str = Field("", alias="DateFormat")
+    alarm_list_version: str = ""
+    daily_index_refresh_time: str = ""
+    time_zone: str = ""
+    time_server: str = ""
+    time_generation: _Number = None
+    time_format: str = ""
+    date_format: str = ""
 
 
 class AudioInEvent(SonosEvent):
     event_path: ClassVar[str] = "/AudioIn/Event"
 
     service: Literal[EventService.AUDIO_IN] = EventService.AUDIO_IN
-    audio_input_name: str = Field("", alias="AudioInputName")
-    icon: str = Field("", alias="Icon")
-    line_in_connected: _Flag = Field(None, alias="LineInConnected")
-    left_line_in_level: _Number = Field(None, alias="LeftLineInLevel")
-    right_line_in_level: _Number = Field(None, alias="RightLineInLevel")
-    playing: _Flag = Field(None, alias="Playing")
+    audio_input_name: str = ""
+    icon: str = ""
+    line_in_connected: _Flag = None
+    left_line_in_level: _Number = None
+    right_line_in_level: _Number = None
+    playing: _Flag = None
 
 
 class AVTransportEvent(SonosEvent):
@@ -201,101 +242,101 @@ class AVTransportEvent(SonosEvent):
     )
 
     service: Literal[EventService.AV_TRANSPORT] = EventService.AV_TRANSPORT
-    transport_state: _State = Field(None, alias="TransportState")
-    transport_status: str = Field("", alias="TransportStatus")
+    transport_state: _State = None
+    transport_status: str = ""
     transport_actions: _CSV = Field((), alias="CurrentTransportActions")
-    transport_play_speed: str = Field("", alias="TransportPlaySpeed")
+    transport_play_speed: str = ""
     play_mode: _PlayMode = Field(None, alias="CurrentPlayMode")
     valid_play_modes: _CSV = Field((), alias="CurrentValidPlayModes")
     crossfade: _Flag = Field(None, alias="CurrentCrossfadeMode")
-    number_of_tracks: _Number = Field(None, alias="NumberOfTracks")
-    current_track: _Number = Field(None, alias="CurrentTrack")
-    current_section: _Number = Field(None, alias="CurrentSection")
+    number_of_tracks: _Number = None
+    current_track: _Number = None
+    current_section: _Number = None
     track: Track | None = None
     next_track: Track | None = None
     enqueued_track: Track | None = None
-    enqueued_transport_uri: str = Field("", alias="EnqueuedTransportURI")
-    av_transport_uri: str = Field("", alias="AVTransportURI")
-    next_av_transport_uri: str = Field("", alias="NextAVTransportURI")
+    enqueued_transport_uri: str = ""
+    av_transport_uri: str = ""
+    next_av_transport_uri: str = ""
     media_duration: str = Field("", alias="CurrentMediaDuration")
-    playback_storage_medium: str = Field("", alias="PlaybackStorageMedium")
-    alarm_running: _Flag = Field(None, alias="AlarmRunning")
-    snooze_running: _Flag = Field(None, alias="SnoozeRunning")
-    restart_pending: _Flag = Field(None, alias="RestartPending")
-    sleep_timer_generation: _Number = Field(None, alias="SleepTimerGeneration")
-    direct_control_client_id: str = Field("", alias="DirectControlClientID")
-    direct_control_account_id: str = Field("", alias="DirectControlAccountID")
-    direct_control_is_suspended: _Flag = Field(None, alias="DirectControlIsSuspended")
+    playback_storage_medium: str = ""
+    alarm_running: _Flag = None
+    snooze_running: _Flag = None
+    restart_pending: _Flag = None
+    sleep_timer_generation: _Number = None
+    direct_control_client_id: str = ""
+    direct_control_account_id: str = ""
+    direct_control_is_suspended: _Flag = None
 
 
 class ContentDirectoryEvent(SonosEvent):
     event_path: ClassVar[str] = "/MediaServer/ContentDirectory/Event"
 
     service: Literal[EventService.CONTENT_DIRECTORY] = EventService.CONTENT_DIRECTORY
-    system_update_id: _Number = Field(None, alias="SystemUpdateID")
-    container_update_ids: _CSV = Field((), alias="ContainerUpdateIDs")
-    favorites_update_id: str = Field("", alias="FavoritesUpdateID")
-    favorite_presets_update_id: str = Field("", alias="FavoritePresetsUpdateID")
-    saved_queues_update_id: str = Field("", alias="SavedQueuesUpdateID")
-    share_list_update_id: str = Field("", alias="ShareListUpdateID")
-    radio_favorites_update_id: str = Field("", alias="RadioFavoritesUpdateID")
-    radio_location_update_id: str = Field("", alias="RadioLocationUpdateID")
-    recently_played_update_id: str = Field("", alias="RecentlyPlayedUpdateID")
-    user_radio_update_id: str = Field("", alias="UserRadioUpdateID")
-    share_index_in_progress: _Flag = Field(None, alias="ShareIndexInProgress")
-    share_index_last_error: str = Field("", alias="ShareIndexLastError")
-    browseable: _Flag = Field(None, alias="Browseable")
+    system_update_id: _Number = None
+    container_update_ids: _CSV = ()
+    favorites_update_id: str = ""
+    favorite_presets_update_id: str = ""
+    saved_queues_update_id: str = ""
+    share_list_update_id: str = ""
+    radio_favorites_update_id: str = ""
+    radio_location_update_id: str = ""
+    recently_played_update_id: str = ""
+    user_radio_update_id: str = ""
+    share_index_in_progress: _Flag = None
+    share_index_last_error: str = ""
+    browseable: _Flag = None
 
 
 class DevicePropertiesEvent(SonosEvent):
     event_path: ClassVar[str] = "/DeviceProperties/Event"
 
     service: Literal[EventService.DEVICE_PROPERTIES] = EventService.DEVICE_PROPERTIES
-    zone_name: str = Field("", alias="ZoneName")
-    active_zone_id: str = Field("", alias="ActiveZoneID")
-    eth_link: _Flag = Field(None, alias="EthLink")
-    icon: str = Field("", alias="Icon")
-    configuration: str = Field("", alias="Configuration")
-    invisible: _Flag = Field(None, alias="Invisible")
-    is_zone_bridge: _Flag = Field(None, alias="IsZoneBridge")
-    is_idle: _Flag = Field(None, alias="IsIdle")
-    more_info: str = Field("", alias="MoreInfo")
-    air_play_enabled: _Flag = Field(None, alias="AirPlayEnabled")
-    supports_audio_in: _Flag = Field(None, alias="SupportsAudioIn")
-    supports_audio_clip: _Flag = Field(None, alias="SupportsAudioClip")
-    channel_map_set: str = Field("", alias="ChannelMapSet")
-    ht_sat_chan_map_set: str = Field("", alias="HTSatChanMapSet")
-    ht_freq: _Number = Field(None, alias="HTFreq")
-    ht_bonded_zone_commit_state: _Number = Field(None, alias="HTBondedZoneCommitState")
-    orientation: _Number = Field(None, alias="Orientation")
-    last_changed_play_state: str = Field("", alias="LastChangedPlayState")
-    room_calibration_state: _Number = Field(None, alias="RoomCalibrationState")
-    available_room_calibration: str = Field("", alias="AvailableRoomCalibration")
+    zone_name: str = ""
+    active_zone_id: str = ""
+    eth_link: _Flag = None
+    icon: str = ""
+    configuration: str = ""
+    invisible: _Flag = None
+    is_zone_bridge: _Flag = None
+    is_idle: _Flag = None
+    more_info: str = ""
+    air_play_enabled: _Flag = None
+    supports_audio_in: _Flag = None
+    supports_audio_clip: _Flag = None
+    channel_map_set: str = ""
+    ht_sat_chan_map_set: str = ""
+    ht_freq: _Number = None
+    ht_bonded_zone_commit_state: _Number = None
+    orientation: _Number = None
+    last_changed_play_state: str = ""
+    room_calibration_state: _Number = None
+    available_room_calibration: str = ""
     tv_configuration_error: _Flag = Field(None, alias="TVConfigurationError")
     hdmi_cec_available: _Flag = Field(None, alias="HdmiCecAvailable")
-    wireless_mode: _Number = Field(None, alias="WirelessMode")
-    wireless_leaf_only: _Flag = Field(None, alias="WirelessLeafOnly")
-    wifi_enabled: _Flag = Field(None, alias="WifiEnabled")
-    has_configured_ssid: _Flag = Field(None, alias="HasConfiguredSSID")
-    behind_wifi_extender: _Number = Field(None, alias="BehindWifiExtender")
-    channel_freq: _Number = Field(None, alias="ChannelFreq")
-    config_mode: str = Field("", alias="ConfigMode")
-    mic_enabled: _Flag = Field(None, alias="MicEnabled")
-    secure_reg_state: _Number = Field(None, alias="SecureRegState")
-    voice_config_state: _Number = Field(None, alias="VoiceConfigState")
-    settings_replication_state: str = Field("", alias="SettingsReplicationState")
+    wireless_mode: _Number = None
+    wireless_leaf_only: _Flag = None
+    wifi_enabled: _Flag = None
+    has_configured_ssid: _Flag = None
+    behind_wifi_extender: _Number = None
+    channel_freq: _Number = None
+    config_mode: str = ""
+    mic_enabled: _Flag = None
+    secure_reg_state: _Number = None
+    voice_config_state: _Number = None
+    settings_replication_state: str = ""
 
 
 class GroupManagementEvent(SonosEvent):
     event_path: ClassVar[str] = "/GroupManagement/Event"
 
     service: Literal[EventService.GROUP_MANAGEMENT] = EventService.GROUP_MANAGEMENT
-    group_coordinator_is_local: _Flag = Field(None, alias="GroupCoordinatorIsLocal")
-    local_group_uuid: str = Field("", alias="LocalGroupUUID")
-    virtual_line_in_group_id: str = Field("", alias="VirtualLineInGroupID")
+    group_coordinator_is_local: _Flag = None
+    local_group_uuid: str = ""
+    virtual_line_in_group_id: str = ""
     source_area_ids: str = Field("", alias="SourceAreaIds")
-    reset_volume_after: _Flag = Field(None, alias="ResetVolumeAfter")
-    volume_av_transport_uri: str = Field("", alias="VolumeAVTransportURI")
+    reset_volume_after: _Flag = None
+    volume_av_transport_uri: str = ""
 
 
 class GroupRenderingControlEvent(SonosEvent):
@@ -304,35 +345,35 @@ class GroupRenderingControlEvent(SonosEvent):
     service: Literal[EventService.GROUP_RENDERING_CONTROL] = (
         EventService.GROUP_RENDERING_CONTROL
     )
-    group_volume: _Number = Field(None, alias="GroupVolume")
+    group_volume: _Number = None
     group_muted: _Flag = Field(None, alias="GroupMute")
-    group_volume_changeable: _Flag = Field(None, alias="GroupVolumeChangeable")
+    group_volume_changeable: _Flag = None
 
 
 class HTControlEvent(SonosEvent):
     event_path: ClassVar[str] = "/HTControl/Event"
 
     service: Literal[EventService.HT_CONTROL] = EventService.HT_CONTROL
-    ir_repeater_state: str = Field("", alias="IRRepeaterState")
-    remote_configured: _Flag = Field(None, alias="RemoteConfigured")
-    tos_link_connected: _Flag = Field(None, alias="TOSLinkConnected")
+    ir_repeater_state: str = ""
+    remote_configured: _Flag = None
+    tos_link_connected: _Flag = None
 
 
 class MusicServicesEvent(SonosEvent):
     event_path: ClassVar[str] = "/MusicServices/Event"
 
     service: Literal[EventService.MUSIC_SERVICES] = EventService.MUSIC_SERVICES
-    service_list_version: str = Field("", alias="ServiceListVersion")
+    service_list_version: str = ""
 
 
 class QueueEvent(SonosEvent):
     event_path: ClassVar[str] = "/MediaRenderer/Queue/Event"
 
     service: Literal[EventService.QUEUE] = EventService.QUEUE
-    update_id: _Number = Field(None, alias="UpdateID")
-    queue_owner_id: str = Field("", alias="QueueOwnerID")
-    queue_owner_context: str = Field("", alias="QueueOwnerContext")
-    curated: _Flag = Field(None, alias="Curated")
+    update_id: _Number = None
+    queue_owner_id: str = ""
+    queue_owner_context: str = ""
+    curated: _Flag = None
 
 
 class RendererConnectionManagerEvent(SonosEvent):
@@ -341,9 +382,9 @@ class RendererConnectionManagerEvent(SonosEvent):
     service: Literal[EventService.RENDERER_CONNECTION_MANAGER] = (
         EventService.RENDERER_CONNECTION_MANAGER
     )
-    source_protocol_info: _CSV = Field((), alias="SourceProtocolInfo")
-    sink_protocol_info: _CSV = Field((), alias="SinkProtocolInfo")
-    current_connection_ids: _CSV = Field((), alias="CurrentConnectionIDs")
+    source_protocol_info: _CSV = ()
+    sink_protocol_info: _CSV = ()
+    current_connection_ids: _CSV = ()
 
 
 class RenderingControlEvent(SonosEvent):
@@ -352,34 +393,34 @@ class RenderingControlEvent(SonosEvent):
     event_path: ClassVar[str] = "/MediaRenderer/RenderingControl/Event"
 
     service: Literal[EventService.RENDERING_CONTROL] = EventService.RENDERING_CONTROL
-    volume: _Number = Field(None, alias="Volume")
+    volume: _Number = None
     muted: _Flag = Field(None, alias="Mute")
-    bass: _Number = Field(None, alias="Bass")
-    treble: _Number = Field(None, alias="Treble")
-    loudness: _Flag = Field(None, alias="Loudness")
-    output_fixed: _Flag = Field(None, alias="OutputFixed")
-    headphone_connected: _Flag = Field(None, alias="HeadphoneConnected")
-    night_mode: _Flag = Field(None, alias="NightMode")
-    dialog_level: _Flag = Field(None, alias="DialogLevel")
-    speech_enhance_enabled: _Flag = Field(None, alias="SpeechEnhanceEnabled")
-    sub_enabled: _Flag = Field(None, alias="SubEnabled")
-    sub_gain: _Number = Field(None, alias="SubGain")
-    sub_crossover: _Number = Field(None, alias="SubCrossover")
-    sub_polarity: _Number = Field(None, alias="SubPolarity")
-    surround_enabled: _Flag = Field(None, alias="SurroundEnabled")
-    surround_mode: _Number = Field(None, alias="SurroundMode")
-    surround_level: _Number = Field(None, alias="SurroundLevel")
-    music_surround_level: _Number = Field(None, alias="MusicSurroundLevel")
-    height_channel_level: _Number = Field(None, alias="HeightChannelLevel")
-    audio_delay: _Number = Field(None, alias="AudioDelay")
-    audio_delay_left_rear: _Number = Field(None, alias="AudioDelayLeftRear")
-    audio_delay_right_rear: _Number = Field(None, alias="AudioDelayRightRear")
-    speaker_size: _Number = Field(None, alias="SpeakerSize")
+    bass: _Number = None
+    treble: _Number = None
+    loudness: _Flag = None
+    output_fixed: _Flag = None
+    headphone_connected: _Flag = None
+    night_mode: _Flag = None
+    dialog_level: _Flag = None
+    speech_enhance_enabled: _Flag = None
+    sub_enabled: _Flag = None
+    sub_gain: _Number = None
+    sub_crossover: _Number = None
+    sub_polarity: _Number = None
+    surround_enabled: _Flag = None
+    surround_mode: _Number = None
+    surround_level: _Number = None
+    music_surround_level: _Number = None
+    height_channel_level: _Number = None
+    audio_delay: _Number = None
+    audio_delay_left_rear: _Number = None
+    audio_delay_right_rear: _Number = None
+    speaker_size: _Number = None
     trueplay_enabled: _Flag = Field(None, alias="SonarEnabled")
     trueplay_calibration_available: _Flag = Field(
         None, alias="SonarCalibrationAvailable"
     )
-    preset_name_list: str = Field("", alias="PresetNameList")
+    preset_name_list: str = ""
 
 
 class ServerConnectionManagerEvent(SonosEvent):
@@ -388,20 +429,20 @@ class ServerConnectionManagerEvent(SonosEvent):
     service: Literal[EventService.SERVER_CONNECTION_MANAGER] = (
         EventService.SERVER_CONNECTION_MANAGER
     )
-    source_protocol_info: _CSV = Field((), alias="SourceProtocolInfo")
-    sink_protocol_info: _CSV = Field((), alias="SinkProtocolInfo")
-    current_connection_ids: _CSV = Field((), alias="CurrentConnectionIDs")
+    source_protocol_info: _CSV = ()
+    sink_protocol_info: _CSV = ()
+    current_connection_ids: _CSV = ()
 
 
 class SystemPropertiesEvent(SonosEvent):
     event_path: ClassVar[str] = "/SystemProperties/Event"
 
     service: Literal[EventService.SYSTEM_PROPERTIES] = EventService.SYSTEM_PROPERTIES
-    customer_id: str = Field("", alias="CustomerID")
-    update_id: _Number = Field(None, alias="UpdateID")
-    update_idx: _Number = Field(None, alias="UpdateIDX")
-    voice_update_id: _Number = Field(None, alias="VoiceUpdateID")
-    third_party_hash: str = Field("", alias="ThirdPartyHash")
+    customer_id: str = ""
+    update_id: _Number = None
+    update_idx: _Number = None
+    voice_update_id: _Number = None
+    third_party_hash: str = ""
 
 
 class VirtualLineInEvent(SonosEvent):
@@ -411,10 +452,10 @@ class VirtualLineInEvent(SonosEvent):
     )
 
     service: Literal[EventService.VIRTUAL_LINE_IN] = EventService.VIRTUAL_LINE_IN
-    transport_state: _State = Field(None, alias="TransportState")
+    transport_state: _State = None
     track: Track | None = None
-    current_track_uri: str = Field("", alias="CurrentTrackURI")
-    enqueued_transport_uri: str = Field("", alias="EnqueuedTransportURI")
+    current_track_uri: str = ""
+    enqueued_transport_uri: str = ""
 
 
 class ZoneGroupTopologyEvent(SonosEvent):
@@ -423,16 +464,16 @@ class ZoneGroupTopologyEvent(SonosEvent):
     service: Literal[EventService.ZONE_GROUP_TOPOLOGY] = (
         EventService.ZONE_GROUP_TOPOLOGY
     )
-    zone_group_state: str = Field("", alias="ZoneGroupState")
-    zone_group_id: str = Field("", alias="ZoneGroupID")
-    zone_group_name: str = Field("", alias="ZoneGroupName")
-    zone_player_uuids_in_group: _CSV = Field((), alias="ZonePlayerUUIDsInGroup")
-    available_software_update: str = Field("", alias="AvailableSoftwareUpdate")
-    alarm_run_sequence: str = Field("", alias="AlarmRunSequence")
+    zone_group_state: str = ""
+    zone_group_id: str = ""
+    zone_group_name: str = ""
+    zone_player_uuids_in_group: _CSV = ()
+    available_software_update: str = ""
+    alarm_run_sequence: str = ""
     third_party_media_servers: str = Field("", alias="ThirdPartyMediaServersX")
     muse_household_id: str = Field("", alias="MuseHouseholdId")
-    areas_update_id: str = Field("", alias="AreasUpdateID")
-    source_areas_update_id: str = Field("", alias="SourceAreasUpdateID")
+    areas_update_id: str = ""
+    source_areas_update_id: str = ""
     net_settings_update_id: str = Field("", alias="NetsettingsUpdateID")
 
 
