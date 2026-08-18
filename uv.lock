@@ -447,7 +447,7 @@ wheels = [
 
 [[package]]
 name = "sonosify"
-version = "0.4.1"
+version = "0.4.4"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -469,7 +469,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
-    { name = "websockets", specifier = ">=16.1" },
+    { name = "websockets", specifier = ">=15.0" },
 ]
 
 [package.metadata.requires-dev]

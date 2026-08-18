@@ -212,6 +212,14 @@ every member of the group at once.
 | `await get_mute()` | `bool` | |
 | `await set_mute(muted)` | `None` | |
 | `await toggle_mute()` | `bool` | Returns the new mute state |
+| `await duck(duration_millis=None)` | `None` | Temporarily lowers playback so external audio can be heard; 1–60000 ms, defaults to the player's own 3000 ms |
+| `await unduck()` | `None` | Ends ducking early |
+
+Ducking attenuates by a fixed amount chosen by the player — it takes no target
+volume. Use it when your integration plays audio *outside* of Sonos (a doorbell,
+an intercom, a voice assistant on another device); audio clips already duck the
+stream themselves. The duration is a safety net rather than a timer: if your
+process dies before `unduck()`, the player restores playback on its own.
 
 #### Status
 
@@ -521,6 +529,7 @@ uv run python examples/play_radio.py Kitchen https://example.com/live.mp3 "Examp
 uv run python examples/local_audio_clip.py --volume 30  # uses SONOS_IP_ADDRESS
 uv run python examples/resume_playback.py Kitchen
 uv run python examples/volume.py Kitchen 25
+uv run python examples/duck_playback.py --seconds 10  # uses SONOS_IP_ADDRESS
 uv run python examples/favorites.py Kitchen
 uv run python examples/favorites.py Kitchen "Jazz FM"
 uv run python examples/track_queue.py Kitchen
