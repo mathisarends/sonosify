@@ -45,6 +45,9 @@ _CONTENT_DIRECTORY = "urn:schemas-upnp-org:service:ContentDirectory:1"
 _DEVICE_PROPERTIES = "urn:schemas-upnp-org:service:DeviceProperties:1"
 _ZONE_GROUP_TOPOLOGY = "urn:schemas-upnp-org:service:ZoneGroupTopology:1"
 
+_PLAYER_VOLUME_NAMESPACE = "playerVolume:1"
+_MAX_DUCK_DURATION_MILLIS = 60_000
+
 
 class SonosClient:
     def __init__(
@@ -394,6 +397,19 @@ class SonosClient:
         await self.set_mute(muted)
         return muted
 
+    async def duck(self, duration_millis: int | None = None) -> None:
+        options: dict[str, object] = {}
+        if duration_millis is not None:
+            if not 1 <= duration_millis <= _MAX_DUCK_DURATION_MILLIS:
+                raise ValueError(
+                    f"duration_millis must be between 1 and {_MAX_DUCK_DURATION_MILLIS}"
+                )
+            options["durationMillis"] = duration_millis
+        await self._player_volume("duck", options)
+
+    async def unduck(self) -> None:
+        await self._player_volume("unduck", {})
+
     async def get_transport_info(self) -> TransportInfo:
         result = await self.__av_transport("GetTransportInfo")
         return TransportInfo.model_validate(result)
@@ -519,6 +535,17 @@ class SonosClient:
             service_urn=_AV_TRANSPORT,
             action=action,
             **kwargs,
+        )
+
+    async def _player_volume(self, command: str, options: dict[str, object]) -> None:
+        player_id = await self._get_or_fetch_player_id()
+        await self._audio_clip_websocket.send_command(
+            {
+                "namespace": _PLAYER_VOLUME_NAMESPACE,
+                "command": command,
+                "playerId": player_id,
+            },
+            options,
         )
 
     async def _rendering(self, action: str, **args: object) -> dict[str, str]:

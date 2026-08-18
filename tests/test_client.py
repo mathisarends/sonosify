@@ -886,3 +886,72 @@ def test_get_zone_group_state_and_room_name(recorder: _RecordingSoap) -> None:
 
     assert _run(client.get_zone_group_state()) == "<state/>"
     assert _run(client.get_room_name()) == "Kitchen"
+
+
+def test_duck_sends_player_volume_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
+        calls.append((*args, kwargs))
+        return {}
+
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
+    client = SonosClient("192.168.1.10", uid="RINCON_1")
+
+    _run(client.duck(5000))
+
+    assert calls[0][0] == {
+        "namespace": "playerVolume:1",
+        "command": "duck",
+        "playerId": "RINCON_1",
+    }
+    assert calls[0][1] == {"durationMillis": 5000}
+
+
+def test_duck_omits_duration_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
+        calls.append((*args, kwargs))
+        return {}
+
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
+    client = SonosClient("192.168.1.10", uid="RINCON_1")
+
+    _run(client.duck())
+
+    assert calls[0][1] == {}
+
+
+@pytest.mark.parametrize("duration", [0, -1, 60_001])
+def test_duck_rejects_out_of_range_duration(duration: int) -> None:
+    client = SonosClient("192.168.1.10", uid="RINCON_1")
+
+    with pytest.raises(ValueError):
+        _run(client.duck(duration))
+
+
+def test_unduck_sends_player_volume_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    async def send_command(
+        self: object, *args: object, **kwargs: object
+    ) -> dict[str, object]:
+        calls.append((*args, kwargs))
+        return {}
+
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
+    client = SonosClient("192.168.1.10", uid="RINCON_1")
+
+    _run(client.unduck())
+
+    assert calls[0][0] == {
+        "namespace": "playerVolume:1",
+        "command": "unduck",
+        "playerId": "RINCON_1",
+    }
+    assert calls[0][1] == {}
