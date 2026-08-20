@@ -310,6 +310,7 @@ asyncio.run(main())
 | --- | --- | --- |
 | `await play_audio_clip(stream_url=None, *, app_id, name="sonosify", volume=None, priority=ClipPriority.LOW, clip_type=None, http_authorization=None, led_behavior=ClipLEDBehavior.NONE)` | `AudioClip` | Schedules a clip. Omitting `stream_url` plays the built-in chime |
 | `await play_audio_clip_data(audio, *, content_type="audio/wav", local_host=None, app_id, name="sonosify", volume=None, priority=ClipPriority.LOW, clip_type=None, led_behavior=ClipLEDBehavior.NONE)` | `HostedAudioClip` | Hosts complete WAV or MP3 data temporarily and schedules it as a clip |
+| `await stream_audio_clip(*, content_type="audio/wav", prebuffer_bytes=0, local_host=None, app_id, name="sonosify", volume=None, priority=ClipPriority.LOW, clip_type=None, led_behavior=ClipLEDBehavior.NONE)` | `AudioClipStream` | Creates a push-based clip whose body can be written incrementally |
 | `await cancel_audio_clip(clip_id)` | `None` | Cancels a scheduled or active clip |
 
 Arguments are validated before the request: `name` 1–64 characters, `app_id`
@@ -347,6 +348,32 @@ print(clip.status)  # DONE, INTERRUPTED, DISMISSED, or ERROR
 `local_host` can override the advertised address on machines with unusual
 network routing. The temporary server and all remaining clip data are released
 when the client closes. `HostedAudioClip.close()` can release one clip earlier.
+
+For a TTS producer, stream PCM as an unbounded WAV body. `loadAudioClip` is
+deferred until `prebuffer_bytes` have arrived, which gives the producer a buffer
+against network jitter without waiting for the complete response:
+
+```python
+from sonosify import streaming_wav_header
+
+stream = await kitchen.stream_audio_clip(
+    app_id="com.example.voice-agent",
+    name="Agent Voice",
+    priority=ClipPriority.HIGH,
+    clip_type=ClipType.VOICE_ASSISTANT,
+    prebuffer_bytes=int(1.5 * sample_rate * channels * 2),
+)
+await stream.write(streaming_wav_header(sample_rate, channels))
+async for pcm_chunk in tts_response:
+    await stream.write(pcm_chunk)
+await stream.end()
+clip = await stream.wait_until_finished(timeout=60)
+```
+
+`write()` applies bounded backpressure. `end()` lets buffered playback finish;
+`abort()` tears down the HTTP body and cancels a clip that has already loaded.
+`wait_until_fetched()` reports when the player opens the HTTP request. The
+public clip types and helpers are also importable from `sonosify.clip`.
 
 ### Live events
 
