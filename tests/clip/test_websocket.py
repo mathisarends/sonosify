@@ -8,9 +8,9 @@ from typing import Any
 import pytest
 from websockets.protocol import State
 
-import sonosify._clip.websocket as websocket_module
-from sonosify._clip.models import AudioClip
-from sonosify._clip.websocket import AudioClipWebSocket
+import sonosify.clip.websocket as websocket_module
+from sonosify.clip.models import AudioClip
+from sonosify.clip.websocket import AudioClipWebSocket
 from sonosify.errors import LocalAPIError, NetworkError
 
 

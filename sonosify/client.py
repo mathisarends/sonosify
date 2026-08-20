@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 from collections.abc import Sequence
 from enum import StrEnum
 from typing import Self
@@ -10,17 +11,17 @@ from xml.etree import ElementTree
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from sonosify._clip import (
+from sonosify._parsing import int_or_none, local_name
+from sonosify.clip import (
     AudioClip,
-    AudioClipServer,
-    AudioClipWebSocket,
+    AudioClipStream,
     ClipLEDBehavior,
     ClipPriority,
     ClipType,
     HostedAudioClip,
-    _local_ip_for,
 )
-from sonosify._parsing import int_or_none, local_name
+from sonosify.clip.server import AudioClipServer, _local_ip_for
+from sonosify.clip.websocket import AudioClipWebSocket
 from sonosify.didl import (
     parse_favorites,
     parse_track_metadata,
@@ -213,6 +214,57 @@ class SonosClient:
                 "playerId": player_id,
             },
             {"id": clip_id},
+        )
+
+    async def stream_audio_clip(
+        self,
+        *,
+        content_type: str = "audio/wav",
+        prebuffer_bytes: int = 0,
+        local_host: str | None = None,
+        app_id: str,
+        name: str = "sonosify",
+        volume: int | None = None,
+        priority: ClipPriority = ClipPriority.LOW,
+        clip_type: ClipType | None = None,
+        led_behavior: ClipLEDBehavior = ClipLEDBehavior.NONE,
+    ) -> AudioClipStream:
+        if content_type not in {"audio/mpeg", "audio/wav"}:
+            raise ValueError("content_type must be 'audio/mpeg' or 'audio/wav'")
+        if prebuffer_bytes < 0:
+            raise ValueError("prebuffer_bytes must not be negative")
+        _validate_audio_clip_arguments(
+            stream_url=None,
+            app_id=app_id,
+            name=name,
+            volume=volume,
+            http_authorization=None,
+        )
+
+        player_id = await self._get_or_fetch_player_id()
+        await self._audio_clip_websocket.subscribe_audio_clips(player_id)
+        server = self._ensure_audio_clip_server()
+        token, streamed = server.add_stream(content_type)
+        host = local_host or _local_ip_for(self._ip)
+        stream_url = f"http://{host}:{server.port}/{token}"
+        load = functools.partial(
+            self.play_audio_clip,
+            stream_url,
+            app_id=app_id,
+            name=name,
+            volume=volume,
+            priority=priority,
+            clip_type=clip_type,
+            led_behavior=led_behavior,
+        )
+        return AudioClipStream(
+            streamed=streamed,
+            server=server,
+            token=token,
+            websocket=self._audio_clip_websocket,
+            load=load,
+            cancel=self.cancel_audio_clip,
+            prebuffer_bytes=prebuffer_bytes,
         )
 
     async def _get_or_fetch_player_id(self) -> str:

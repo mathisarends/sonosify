@@ -281,6 +281,78 @@ def test_play_audio_clip_data_validates_local_media(
         )
 
 
+def test_stream_audio_clip_defers_load_until_prebuffer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subscriptions: list[str] = []
+    commands: list[tuple[object, object]] = []
+
+    async def subscribe(self: object, player_id: str) -> None:
+        subscriptions.append(player_id)
+
+    async def send_command(
+        self: object, command: object, options: object
+    ) -> dict[str, object]:
+        commands.append((command, options))
+        return {
+            "id": "clip-1",
+            "name": "Agent",
+            "appId": "com.example.agent",
+        }
+
+    monkeypatch.setattr(
+        client_module.AudioClipWebSocket, "subscribe_audio_clips", subscribe
+    )
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
+
+    async def run() -> tuple[str, bool]:
+        client = SonosClient("192.168.1.10", uid="RINCON_1")
+        try:
+            stream = await client.stream_audio_clip(
+                app_id="com.example.agent",
+                name="Agent",
+                local_host="127.0.0.1",
+                prebuffer_bytes=6,
+            )
+            await stream.write(b"abc")
+            assert commands == []
+            await stream.write(b"def")
+            stream.close()
+            return stream.id, stream.fetched
+        finally:
+            await client.close()
+
+    clip_id, fetched = asyncio.run(run())
+
+    assert clip_id == "clip-1"
+    assert fetched is False
+    assert subscriptions == ["RINCON_1"]
+    assert len(commands) == 1
+    assert commands[0][1]["streamUrl"].startswith("http://127.0.0.1:")
+
+
+@pytest.mark.parametrize(
+    ("content_type", "prebuffer_bytes", "match"),
+    [
+        ("audio/ogg", 0, "content_type"),
+        ("audio/wav", -1, "prebuffer_bytes"),
+    ],
+)
+def test_stream_audio_clip_validates_local_media(
+    content_type: str, prebuffer_bytes: int, match: str
+) -> None:
+    client = SonosClient("192.168.1.10", uid="RINCON_1")
+
+    with pytest.raises(ValueError, match=match):
+        _run(
+            client.stream_audio_clip(
+                content_type=content_type,
+                prebuffer_bytes=prebuffer_bytes,
+                app_id="com.example.agent",
+            )
+        )
+
+
 def test_cancel_audio_clip_rejects_empty_clip_id() -> None:
     client = SonosClient("192.168.1.10", uid="RINCON_1")
 

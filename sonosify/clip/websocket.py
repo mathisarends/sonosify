@@ -10,7 +10,7 @@ from websockets.exceptions import WebSocketException
 from websockets.protocol import State
 from websockets.typing import Subprotocol
 
-from sonosify._clip.models import AudioClip
+from sonosify.clip.models import AudioClip
 from sonosify.errors import LocalAPIError, NetworkError
 
 # The LAN handshake requires this header but doesn't authenticate its value.
