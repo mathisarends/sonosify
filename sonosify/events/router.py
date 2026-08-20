@@ -3,7 +3,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from sonosify.events.models import SonosEvent
+from .models import SonosEvent
 
 type EventHandler[E: SonosEvent] = Callable[[E], Awaitable[None] | None]
 

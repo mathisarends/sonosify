@@ -9,9 +9,9 @@ from xml.etree import ElementTree
 
 import httpx
 
-from sonosify._parsing import int_or_none, parse_headers
-from sonosify.errors import SubscriptionError
-from sonosify.events.models import (
+from .._parsing import int_or_none, parse_headers
+from ..errors import SubscriptionError
+from .models import (
     DEFAULT_SERVICES,
     EventService,
     SonosEvent,
@@ -20,8 +20,8 @@ from sonosify.events.models import (
     event_path,
     require_service,
 )
-from sonosify.events.parsing import parse_notify_event
-from sonosify.events.router import EventHandler, EventRouter
+from .parsing import parse_notify_event
+from .router import EventHandler, EventRouter
 
 _MIN_RENEW_INTERVAL = 15.0
 _RETRY_INTERVAL = 5.0

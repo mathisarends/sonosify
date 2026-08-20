@@ -1,7 +1,7 @@
 from html import escape
 from xml.etree import ElementTree
 
-from sonosify.models import Favorite, Track
+from .models import Favorite, Track
 
 _DIDL_NS = "urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"
 _DC_NS = "http://purl.org/dc/elements/1.1/"

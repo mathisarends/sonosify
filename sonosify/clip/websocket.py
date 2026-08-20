@@ -10,8 +10,8 @@ from websockets.exceptions import WebSocketException
 from websockets.protocol import State
 from websockets.typing import Subprotocol
 
-from sonosify.clip.models import AudioClip
-from sonosify.errors import LocalAPIError, NetworkError
+from ..errors import LocalAPIError, NetworkError
+from .models import AudioClip
 
 # The LAN handshake requires this header but doesn't authenticate its value.
 # This recognizable UUID-shaped placeholder is not a credential or secret.

@@ -11,8 +11,8 @@ from xml.etree import ElementTree
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from sonosify._parsing import int_or_none, local_name
-from sonosify.clip import (
+from ._parsing import int_or_none, local_name
+from .clip import (
     AudioClip,
     AudioClipStream,
     ClipLEDBehavior,
@@ -20,23 +20,23 @@ from sonosify.clip import (
     ClipType,
     HostedAudioClip,
 )
-from sonosify.clip.server import AudioClipServer, _local_ip_for
-from sonosify.clip.websocket import AudioClipWebSocket
-from sonosify.didl import (
+from .clip.server import AudioClipServer, _local_ip_for
+from .clip.websocket import AudioClipWebSocket
+from .didl import (
     parse_favorites,
     parse_track_metadata,
     radio_metadata,
     radio_uri,
 )
-from sonosify.errors import LocalAPIError, NetworkError
-from sonosify.events import (
+from .errors import LocalAPIError, NetworkError
+from .events import (
     DEFAULT_SERVICES,
     EventService,
     EventSubscription,
     TransportState,
 )
-from sonosify.models import Favorite, PlaybackState, Speaker, Track
-from sonosify.soap import soap_call
+from .models import Favorite, PlaybackState, Speaker, Track
+from .soap import soap_call
 
 DEFAULT_TIMEOUT = 15.0
 

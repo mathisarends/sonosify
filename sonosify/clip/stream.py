@@ -1,10 +1,10 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from sonosify.clip.models import AudioClip
-from sonosify.clip.server import _STREAM_END, AudioClipServer, _StreamedAudio
-from sonosify.clip.websocket import AudioClipWebSocket
-from sonosify.errors import NetworkError
+from ..errors import NetworkError
+from .models import AudioClip
+from .server import _STREAM_END, AudioClipServer, _StreamedAudio
+from .websocket import AudioClipWebSocket
 
 
 class AudioClipStream:

@@ -1,6 +1,6 @@
-from sonosify.client import DEFAULT_TIMEOUT, SonosClient
-from sonosify.errors import AmbiguousSpeakerError, SpeakerNotFoundError
-from sonosify.models import Group, Speaker
+from .client import DEFAULT_TIMEOUT, SonosClient
+from .errors import AmbiguousSpeakerError, SpeakerNotFoundError
+from .models import Group, Speaker
 
 
 class SonosSystem:

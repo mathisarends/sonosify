@@ -1,7 +1,7 @@
 from xml.etree import ElementTree
 
-from sonosify._parsing import local_name
-from sonosify.events.models import (
+from .._parsing import local_name
+from .models import (
     RawEventValues,
     SonosEvent,
     event_type,

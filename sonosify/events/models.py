@@ -3,8 +3,8 @@ from typing import Annotated, ClassVar, Literal, NamedTuple
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
-from sonosify.didl import parse_track_metadata
-from sonosify.models import Track
+from ..didl import parse_track_metadata
+from ..models import Track
 
 
 class EventService(StrEnum):

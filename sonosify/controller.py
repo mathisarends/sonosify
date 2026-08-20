@@ -1,10 +1,10 @@
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 
-from sonosify.client import DEFAULT_TIMEOUT, SonosClient
-from sonosify.discovery import _DEFAULT_DISCOVERY_TIMEOUT, discover
-from sonosify.events import DEFAULT_SERVICES, EventService, EventSubscription
-from sonosify.topology import SonosSystem
+from .client import DEFAULT_TIMEOUT, SonosClient
+from .discovery import _DEFAULT_DISCOVERY_TIMEOUT, discover
+from .events import DEFAULT_SERVICES, EventService, EventSubscription
+from .topology import SonosSystem
 
 
 class SonosController:

@@ -10,11 +10,11 @@ from xml.etree import ElementTree
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from sonosify._parsing import local_name, parse_headers
-from sonosify.client import DEFAULT_TIMEOUT, SonosClient
-from sonosify.errors import DiscoveryError
-from sonosify.models import Group, Speaker
-from sonosify.topology import SonosSystem
+from ._parsing import local_name, parse_headers
+from .client import DEFAULT_TIMEOUT, SonosClient
+from .errors import DiscoveryError
+from .models import Group, Speaker
+from .topology import SonosSystem
 
 _DEFAULT_DISCOVERY_TIMEOUT = 2.0
 
