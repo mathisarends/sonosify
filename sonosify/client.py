@@ -42,6 +42,7 @@ DEFAULT_TIMEOUT = 15.0
 
 _AV_TRANSPORT = "urn:schemas-upnp-org:service:AVTransport:1"
 _RENDERING_CONTROL = "urn:schemas-upnp-org:service:RenderingControl:1"
+_GROUP_RENDERING_CONTROL = "urn:schemas-upnp-org:service:GroupRenderingControl:1"
 _CONTENT_DIRECTORY = "urn:schemas-upnp-org:service:ContentDirectory:1"
 _DEVICE_PROPERTIES = "urn:schemas-upnp-org:service:DeviceProperties:1"
 _ZONE_GROUP_TOPOLOGY = "urn:schemas-upnp-org:service:ZoneGroupTopology:1"
@@ -423,12 +424,12 @@ class SonosClient:
         return volume
 
     async def get_group_volume(self) -> int:
-        result = await self._rendering("GetGroupVolume")
+        result = await self._group_rendering("GetGroupVolume")
         return int(result.get("CurrentVolume", "0"))
 
     async def set_group_volume(self, volume: int) -> None:
         volume = max(0, min(100, volume))
-        await self._rendering("SetGroupVolume", DesiredVolume=str(volume))
+        await self._group_rendering("SetGroupVolume", DesiredVolume=str(volume))
 
     async def adjust_group_volume(self, delta: int) -> int:
         volume = max(0, min(100, await self.get_group_volume() + delta))
@@ -610,6 +611,15 @@ class SonosClient:
             service_urn=_RENDERING_CONTROL,
             action=action,
             **kwargs,
+        )
+
+    async def _group_rendering(self, action: str, **args: object) -> dict[str, str]:
+        return await self._soap(
+            path="/MediaRenderer/GroupRenderingControl/Control",
+            service_urn=_GROUP_RENDERING_CONTROL,
+            action=action,
+            InstanceID="0",
+            **args,
         )
 
     async def __content_directory(self, action: str, **args: object) -> dict[str, str]:

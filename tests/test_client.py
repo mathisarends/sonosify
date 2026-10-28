@@ -791,6 +791,13 @@ def test_group_volume_get_set_and_adjust(recorder: _RecordingSoap) -> None:
 
     new_volume = _run(client.adjust_group_volume(5))
     assert new_volume == 25
+    for endpoint, service, _, args in recorder.calls:
+        assert (
+            endpoint
+            == "http://192.168.1.10:1400/MediaRenderer/GroupRenderingControl/Control"
+        )
+        assert service == "urn:schemas-upnp-org:service:GroupRenderingControl:1"
+        assert args["InstanceID"] == "0"
 
 
 def test_mute_get_set_and_toggle(recorder: _RecordingSoap) -> None:
