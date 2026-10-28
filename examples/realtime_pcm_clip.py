@@ -15,11 +15,9 @@ from collections.abc import AsyncIterable, AsyncIterator
 from pathlib import Path
 
 from sonosify import (
-    AudioClip,
     ClipPriority,
     ClipType,
     SonosClient,
-    streaming_wav_header,
 )
 
 
@@ -51,35 +49,6 @@ async def _pcm48_stereo(chunks: AsyncIterable[bytes]) -> AsyncIterator[bytes]:
         yield struct.pack("<hhhh", previous, previous, previous, previous)
 
 
-async def _play_pcm(
-    client: SonosClient,
-    chunks: AsyncIterable[bytes],
-    *,
-    volume: int = 8,
-    timeout: float = 60.0,
-) -> AudioClip:
-    stream = await client.stream_audio_clip(
-        app_id="sonosify.realtime-pcm",
-        name="Realtime PCM",
-        volume=volume,
-        priority=ClipPriority.HIGH,
-        clip_type=ClipType.CUSTOM,
-        prebuffer_bytes=0,
-    )
-    try:
-        # Prime the player before awaiting the first model-generated PCM chunk.
-        await stream.write(streaming_wav_header(48_000, channels=2))
-        async for chunk in _pcm48_stereo(chunks):
-            await stream.write(chunk)
-        await stream.end()
-        return await stream.wait_until_finished(timeout=timeout)
-    except BaseException:
-        await asyncio.shield(stream.abort())
-        raise
-    finally:
-        stream.close()
-
-
 async def _pcm_file(path: Path) -> AsyncIterator[bytes]:
     loop = asyncio.get_running_loop()
     started = loop.time()
@@ -95,7 +64,17 @@ async def _pcm_file(path: Path) -> AsyncIterator[bytes]:
 
 async def _main(args: argparse.Namespace) -> None:
     async with SonosClient(args.ip) as client:
-        result = await _play_pcm(client, _pcm_file(args.pcm_file), volume=args.volume)
+        await client.prepare_audio()
+        result = await client.play_pcm(
+            _pcm48_stereo(_pcm_file(args.pcm_file)),
+            sample_rate=48_000,
+            channels=2,
+            app_id="sonosify.realtime-pcm",
+            name="Realtime PCM",
+            volume=args.volume,
+            priority=ClipPriority.HIGH,
+            clip_type=ClipType.CUSTOM,
+        )
         print(f"clip finished: {result.status}")
 
 

@@ -1279,3 +1279,31 @@ def test_open_next_enqueues_without_replacing_current_playback(
     else:
         assert args["EnqueuedURI"] == value
         assert args["EnqueuedURIMetaData"] == ""
+
+
+def test_prepare_audio_reuses_identity_subscription_and_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, Mock
+
+    class Server:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    async def run() -> None:
+        server = Server()
+        factory = Mock(return_value=server)
+        monkeypatch.setattr(client_module, "AudioClipServer", factory)
+        async with SonosClient("192.168.1.10", uid="known") as client:
+            command = AsyncMock(return_value={})
+            monkeypatch.setattr(client._audio_clip_websocket, "send_command", command)
+            await asyncio.gather(client.prepare_audio(), client.prepare_audio())
+            command.assert_awaited_once()
+            assert command.call_args.args[0]["playerId"] == "known"
+            factory.assert_called_once()
+            assert client._audio_clip_server is server
+        assert server.closed
+
+    asyncio.run(run())

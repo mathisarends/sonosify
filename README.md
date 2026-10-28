@@ -323,6 +323,38 @@ restore it — ideal for TTS and notification sounds. They use the player's loca
 Control API WebSocket, which targets the speaker's immutable player ID, so
 discovery (or a `uid`) is required.
 
+For PCM producers, `play_pcm()` accepts an `AsyncIterable[bytes]`, adds the
+streaming WAVE header, feeds the clip, and waits for completion:
+
+```python
+async with SonosController() as sonos:
+    kitchen = await sonos.speaker("Kitchen")
+    await kitchen.prepare_audio()  # optional: prepare before starting the producer
+    clip = await kitchen.play_pcm(
+        pcm_chunks,
+        sample_rate=24_000,
+        channels=1,
+        app_id="my.voice-agent",
+    )
+```
+
+PCM bytes keep their original sample rate and channel layout. Samples are
+interleaved, little-endian PCM (`sample_width=2` means signed PCM16; 8-bit PCM
+uses unsigned samples). Arbitrary chunk boundaries are accepted, but the
+complete stream must contain whole frames and at least one frame.
+`prebuffer_seconds=0` starts the player with the header before waiting for the
+first chunk. Positive values buffer that duration of PCM, excluding the header.
+The `timeout` (60 seconds by default, `None` for no deadline) covers preparation,
+production, and playback. Errors, cancellation, or timeout abort the clip and
+release its stream. Cancellation of the lower-level wait methods alone still
+leaves playback running.
+
+`prepare_audio()` opens the Control API subscription and clip server without
+playing sound. Repeated calls reuse those resources. The tuned
+[`realtime_pcm_clip.py`](examples/realtime_pcm_clip.py) example still explicitly
+converts 24 kHz mono to 48 kHz stereo, matching the measured startup comparison;
+`play_pcm()` performs no implicit resampling.
+
 ```python
 import asyncio
 
@@ -348,6 +380,8 @@ asyncio.run(main())
 
 | Method | Returns | Description |
 | --- | --- | --- |
+| `await prepare_audio()` | `None` | Prepares identity, Control API subscription, and clip server without playing sound |
+| `await play_pcm(chunks, *, sample_rate, channels=1, sample_width=2, prebuffer_seconds=0, timeout=60, app_id, ...)` | `AudioClip` | Streams PCM to completion with automatic header, abort, and resource cleanup; accepts the same clip options as `stream_audio_clip()` |
 | `await play_audio_clip(stream_url=None, *, app_id, name="sonosify", volume=None, priority=ClipPriority.LOW, clip_type=None, http_authorization=None, led_behavior=ClipLEDBehavior.NONE)` | `AudioClip` | Schedules a clip. Omitting `stream_url` plays the built-in chime |
 | `await play_audio_clip_data(audio, *, content_type="audio/wav", local_host=None, app_id, name="sonosify", volume=None, priority=ClipPriority.LOW, clip_type=None, led_behavior=ClipLEDBehavior.NONE)` | `HostedAudioClip` | Hosts complete WAV or MP3 data temporarily and schedules it as a clip |
 | `await stream_audio_clip(*, content_type="audio/wav", prebuffer_bytes=0, local_host=None, app_id, name="sonosify", volume=None, priority=ClipPriority.LOW, clip_type=None, led_behavior=ClipLEDBehavior.NONE)` | `AudioClipStream` | Creates a push-based clip whose body can be written incrementally |

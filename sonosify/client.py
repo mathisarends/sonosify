@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from collections.abc import Awaitable, Callable, Sequence
+import math
+from collections.abc import AsyncIterable, Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack
 from typing import Self
 from xml.etree import ElementTree
@@ -19,7 +20,9 @@ from .clip import (
     ClipPriority,
     ClipType,
     HostedAudioClip,
+    streaming_wav_header,
 )
+from .clip._pcm import _play_pcm
 from .clip._validation import _validate_audio_clip_arguments
 from .clip.server import AudioClipServer, _local_ip_for
 from .clip.websocket import AudioClipWebSocket
@@ -197,8 +200,7 @@ class SonosClient:
             http_authorization=None,
         )
 
-        player_id = await self._get_or_fetch_player_id()
-        await self._audio_clip_websocket.subscribe_audio_clips(player_id)
+        await self.prepare_audio()
         server = self._ensure_audio_clip_server()
         token, fetched = server.add(audio, content_type)
         host = local_host or _local_ip_for(self._ip)
@@ -263,8 +265,7 @@ class SonosClient:
             http_authorization=None,
         )
 
-        player_id = await self._get_or_fetch_player_id()
-        await self._audio_clip_websocket.subscribe_audio_clips(player_id)
+        await self.prepare_audio()
         server = self._ensure_audio_clip_server()
         token, streamed = server.add_stream(content_type)
         host = local_host or _local_ip_for(self._ip)
@@ -288,6 +289,51 @@ class SonosClient:
             cancel=self.cancel_audio_clip,
             prebuffer_bytes=prebuffer_bytes,
         )
+
+    async def prepare_audio(self) -> None:
+        async with self._close_lock:
+            player_id = await self._get_or_fetch_player_id()
+            await self._audio_clip_websocket.subscribe_audio_clips(player_id)
+            self._ensure_audio_clip_server()
+
+    async def play_pcm(
+        self,
+        chunks: AsyncIterable[bytes],
+        *,
+        sample_rate: int,
+        channels: int = 1,
+        sample_width: int = 2,
+        prebuffer_seconds: float = 0.0,
+        timeout: float | None = 60.0,
+        local_host: str | None = None,
+        app_id: str,
+        name: str = "sonosify",
+        volume: int | None = None,
+        priority: ClipPriority = ClipPriority.LOW,
+        clip_type: ClipType | None = None,
+        led_behavior: ClipLEDBehavior = ClipLEDBehavior.NONE,
+    ) -> AudioClip:
+        header = streaming_wav_header(sample_rate, channels, sample_width)
+        if not math.isfinite(prebuffer_seconds) or prebuffer_seconds < 0:
+            raise ValueError("prebuffer_seconds must be finite and non-negative")
+        frame_size = channels * sample_width
+        prebuffer_bytes = (
+            len(header) + math.ceil(prebuffer_seconds * sample_rate) * frame_size
+            if prebuffer_seconds
+            else 0
+        )
+        async with asyncio.timeout(timeout):
+            stream = await self.stream_audio_clip(
+                prebuffer_bytes=prebuffer_bytes,
+                local_host=local_host,
+                app_id=app_id,
+                name=name,
+                volume=volume,
+                priority=priority,
+                clip_type=clip_type,
+                led_behavior=led_behavior,
+            )
+            return await _play_pcm(stream, chunks, header=header, frame_size=frame_size)
 
     async def _get_or_fetch_player_id(self) -> str:
         self._ensure_open()
