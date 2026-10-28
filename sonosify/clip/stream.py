@@ -73,12 +73,13 @@ class AudioClipStream:
             self._ended = True
 
     async def abort(self) -> None:
+        # Wake writers waiting for queue space before waiting for their lock.
+        self._streamed.close()
         async with self._lock:
             if self._aborted:
                 return
             self._aborted = True
             self._prefix.clear()
-            self._streamed.close()
             self._server.remove(self._token)
             if self._clip is not None:
                 await asyncio.shield(self._cancel(self._clip.id))

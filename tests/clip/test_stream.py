@@ -205,3 +205,45 @@ def test_stream_close_rejects_later_writes() -> None:
             server.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("prebuffer_bytes", [0, 33])
+def test_abort_unblocks_a_writer_with_a_full_buffer(prebuffer_bytes: int) -> None:
+    async def run() -> None:
+        server = AudioClipServer(host="127.0.0.1")
+        cancellations: list[str] = []
+
+        async def cancel(clip_id: str) -> None:
+            cancellations.append(clip_id)
+
+        token, streamed = server.add_stream("audio/wav")
+        handle = AudioClipStream(
+            streamed=streamed,
+            server=server,
+            token=token,
+            websocket=_WebSocket(),  # type: ignore[arg-type]
+            load=lambda: asyncio.sleep(0, result=_clip()),
+            cancel=cancel,
+            prebuffer_bytes=prebuffer_bytes,
+        )
+        writer: asyncio.Task[None] | None = None
+        try:
+            for _ in range(streamed.queue.maxsize):
+                await handle.write(b"a")
+            writer = asyncio.create_task(handle.write(b"b"))
+            await asyncio.sleep(0)
+            assert not writer.done()
+
+            await asyncio.wait_for(handle.abort(), timeout=1.0)
+            with pytest.raises(NetworkError, match="closed"):
+                await asyncio.wait_for(writer, timeout=1.0)
+            assert streamed.closed.is_set()
+            assert cancellations == ["clip-1"]
+        finally:
+            handle.close()
+            if writer is not None:
+                writer.cancel()
+                await asyncio.gather(writer, return_exceptions=True)
+            server.close()
+
+    asyncio.run(run())
