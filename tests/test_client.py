@@ -800,17 +800,56 @@ def test_set_volume_clamps_to_valid_range(recorder: _RecordingSoap) -> None:
     assert recorder.calls[0][3]["DesiredVolume"] == "100"
 
 
-def test_adjust_volume_clamps_and_returns_new_level(
-    recorder: _RecordingSoap,
+@pytest.mark.parametrize(
+    ("delta", "adjustment", "new_volume"),
+    [
+        (10, "10", 100),
+        (-10, "-10", 0),
+        (1000, "100", 100),
+        (-1000, "-100", 0),
+        (0, "0", 42),
+    ],
+)
+def test_adjust_volume_uses_one_relative_request_and_returns_player_volume(
+    recorder: _RecordingSoap, delta: int, adjustment: str, new_volume: int
 ) -> None:
-    recorder._responses["GetVolume"] = {"CurrentVolume": "95"}
+    recorder._responses["SetRelativeVolume"] = {"NewVolume": str(new_volume)}
     client = SonosClient("192.168.1.10")
 
-    new_volume = _run(client.adjust_volume(10))
+    assert _run(client.adjust_volume(delta)) == new_volume
+    assert len(recorder.calls) == 1
+    assert recorder.calls[0][2:] == (
+        "SetRelativeVolume",
+        {"InstanceID": "0", "Channel": "Master", "Adjustment": adjustment},
+    )
 
-    assert new_volume == 100
-    set_call = next(call for call in recorder.calls if call[2] == "SetVolume")
-    assert set_call[3]["DesiredVolume"] == "100"
+
+def test_concurrent_volume_adjustments_do_not_overwrite_each_other(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    volume = 40
+
+    async def player(http, endpoint, service, action, args):  # type: ignore[no-untyped-def]
+        nonlocal volume
+        if action == "GetVolume":
+            previous = volume
+            await asyncio.sleep(0)
+            return {"CurrentVolume": str(previous)}
+        if action == "SetVolume":
+            volume = int(args["DesiredVolume"])
+            return {}
+        assert action == "SetRelativeVolume"
+        volume = max(0, min(100, volume + int(args["Adjustment"])))
+        return {"NewVolume": str(volume)}
+
+    monkeypatch.setattr(client_module, "soap_call", player)
+
+    async def run() -> None:
+        async with SonosClient("192.168.1.10") as client:
+            await asyncio.gather(*(client.adjust_volume(delta) for delta in (5, 7, -2)))
+
+    _run(run())
+    assert volume == 50
 
 
 def test_group_volume_get_set_and_adjust(recorder: _RecordingSoap) -> None:

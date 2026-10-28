@@ -425,9 +425,12 @@ class SonosClient:
         await self._rendering("SetVolume", Channel="Master", DesiredVolume=str(volume))
 
     async def adjust_volume(self, delta: int) -> int:
-        volume = max(0, min(100, await self.get_volume() + delta))
-        await self.set_volume(volume)
-        return volume
+        result = await self._rendering(
+            "SetRelativeVolume",
+            Channel="Master",
+            Adjustment=str(max(-100, min(100, delta))),
+        )
+        return int(result["NewVolume"])
 
     async def get_group_volume(self) -> int:
         result = await self._group_rendering("GetGroupVolume")

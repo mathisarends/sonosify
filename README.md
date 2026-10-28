@@ -207,7 +207,7 @@ every member of the group at once.
 | --- | --- | --- |
 | `await get_volume()` | `int` | 0–100 |
 | `await set_volume(volume)` | `None` | Clamped to 0–100 |
-| `await adjust_volume(delta)` | `int` | Relative change; returns the new volume |
+| `await adjust_volume(delta)` | `int` | One relative request; the player clamps to 0–100 and returns the new volume |
 | `await get_group_volume()` / `await set_group_volume(volume)` / `await adjust_group_volume(delta)` | | Same three operations for the whole group |
 | `await get_mute()` | `bool` | |
 | `await set_mute(muted)` | `None` | |
