@@ -247,3 +247,50 @@ def test_abort_unblocks_a_writer_with_a_full_buffer(prebuffer_bytes: int) -> Non
             server.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("ending", [False, True])
+def test_cancelled_write_or_end_cleans_up_pending_queue_tasks(ending: bool) -> None:
+    async def run() -> None:
+        server = AudioClipServer(host="127.0.0.1")
+        token, streamed = server.add_stream("audio/wav")
+        handle = AudioClipStream(
+            streamed=streamed,
+            server=server,
+            token=token,
+            websocket=_WebSocket(),  # type: ignore[arg-type]
+            load=lambda: asyncio.sleep(0, result=_clip()),
+            cancel=lambda clip_id: asyncio.sleep(0),
+            prebuffer_bytes=0,
+        )
+        writer: asyncio.Task[None] | None = None
+        try:
+            for _ in range(streamed.queue.maxsize):
+                await handle.write(b"buffered")
+            previous_tasks = asyncio.all_tasks()
+            writer = asyncio.create_task(
+                handle.end() if ending else handle.write(b"cancelled")
+            )
+            await asyncio.sleep(0)
+            assert not writer.done()
+            writer.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await writer
+
+            assert asyncio.all_tasks() == previous_tasks
+            buffered = [
+                streamed.queue.get_nowait() for _ in range(streamed.queue.qsize())
+            ]
+            assert buffered == [b"buffered"] * streamed.queue.maxsize
+            await asyncio.sleep(0)
+            assert streamed.queue.empty()
+            await handle.write(b"after cancellation")
+            assert streamed.queue.get_nowait() == b"after cancellation"
+        finally:
+            handle.close()
+            if writer is not None:
+                writer.cancel()
+                await asyncio.gather(writer, return_exceptions=True)
+            server.close()
+
+    asyncio.run(run())

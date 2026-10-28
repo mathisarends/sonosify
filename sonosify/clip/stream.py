@@ -122,18 +122,21 @@ class AudioClipStream:
             raise NetworkError("Sonos player disconnected from audio clip stream")
         put = asyncio.create_task(self._streamed.queue.put(item))
         unavailable = asyncio.create_task(self._streamed.unavailable.wait())
-        done, _ = await asyncio.wait(
-            {put, unavailable}, return_when=asyncio.FIRST_COMPLETED
-        )
-        if unavailable in done and not put.done():
+        try:
+            done, _ = await asyncio.wait(
+                {put, unavailable}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if unavailable in done:
+                if self._streamed.disconnected.is_set():
+                    raise NetworkError(
+                        "Sonos player disconnected from audio clip stream"
+                    )
+                raise NetworkError("audio clip stream was closed")
+            await put
+        finally:
             put.cancel()
-            await asyncio.gather(put, return_exceptions=True)
-            if self._streamed.disconnected.is_set():
-                raise NetworkError("Sonos player disconnected from audio clip stream")
-            raise NetworkError("audio clip stream was closed")
-        unavailable.cancel()
-        await asyncio.gather(unavailable, return_exceptions=True)
-        await put
+            unavailable.cancel()
+            await asyncio.gather(put, unavailable, return_exceptions=True)
 
     def _ensure_writable(self) -> None:
         if self._aborted:
