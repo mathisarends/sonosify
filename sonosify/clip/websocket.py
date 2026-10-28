@@ -36,6 +36,7 @@ class AudioClipWebSocket:
         self._ip = ip
         self._timeout = timeout
         self._connection: ClientConnection | None = None
+        self._connection_error: Exception | None = None
         self._reader_task: asyncio.Task[None] | None = None
         self._pending_response: asyncio.Future[_JsonObject] | None = None
         self._command_lock = asyncio.Lock()
@@ -65,6 +66,7 @@ class AudioClipWebSocket:
                 await self._discard()
                 raise
             except (OSError, TimeoutError, WebSocketException) as exc:
+                response.cancel()
                 await self._discard()
                 raise NetworkError(
                     f"local Sonos WebSocket request failed: {exc}"
@@ -93,6 +95,9 @@ class AudioClipWebSocket:
                 current = self._clip_states.get(clip_id)
                 if current is not None and current.status in _TERMINAL_CLIP_STATES:
                     return current
+
+                if self._connection_error is not None:
+                    raise self._connection_error
 
                 waiter: asyncio.Future[AudioClip] = (
                     asyncio.get_running_loop().create_future()
@@ -144,6 +149,7 @@ class AudioClipWebSocket:
             ) from exc
 
         self._connection = connection
+        self._connection_error = None
         self._reader_task = asyncio.create_task(self._read_messages(connection))
         return connection
 
@@ -199,6 +205,7 @@ class AudioClipWebSocket:
                     waiter.set_result(clip)
 
     def _fail_pending(self, error: Exception) -> None:
+        self._connection_error = error
         if self._pending_response is not None and not self._pending_response.done():
             self._pending_response.set_exception(error)
         for waiters in self._clip_waiters.values():
@@ -207,6 +214,7 @@ class AudioClipWebSocket:
                     waiter.set_exception(error)
 
     async def _discard(self) -> None:
+        self._fail_pending(NetworkError("local Sonos WebSocket connection closed"))
         connection, self._connection = self._connection, None
         reader, self._reader_task = self._reader_task, None
         self._audio_clip_subscribed = False

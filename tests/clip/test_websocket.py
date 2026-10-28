@@ -350,3 +350,51 @@ def test_cancelled_command_discards_late_reply(
             await transport.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("wait_before_close", [False, True])
+def test_close_fails_clip_waiters_and_allows_a_fresh_connection(
+    monkeypatch: pytest.MonkeyPatch, wait_before_close: bool
+) -> None:
+    first = _Connection('[{"success": true}, {}]')
+    second = _Connection('[{"success": true}, {"id": "clip-2"}]')
+    connections = iter((first, second))
+
+    async def connect(*args: object, **kwargs: object) -> _Connection:
+        return next(connections)
+
+    monkeypatch.setattr(websocket_module, "connect", connect)
+
+    async def run() -> None:
+        transport = AudioClipWebSocket("192.168.1.10", timeout=1.0)
+        waiter: asyncio.Task[AudioClip] | None = None
+        try:
+            await transport.subscribe_audio_clips("RINCON_1")
+            if wait_before_close:
+                waiter = asyncio.create_task(transport.wait_for_audio_clip("clip-1"))
+                await asyncio.sleep(0)
+            await transport.close()
+            with pytest.raises(NetworkError, match="connection closed"):
+                await asyncio.wait_for(
+                    waiter
+                    if waiter is not None
+                    else transport.wait_for_audio_clip("clip-1"),
+                    timeout=1.0,
+                )
+            assert not transport._clip_waiters
+
+            await transport.send_command({"command": "loadAudioClip"})
+            second.emit(
+                '[{"namespace": "audioClip:1", "type": "audioClipStatus"}, '
+                '{"audioClips": [{"id": "clip-2", "name": "test", '
+                '"appId": "test", "status": "DONE"}]}]'
+            )
+            result = await transport.wait_for_audio_clip("clip-2", timeout=1.0)
+            assert result.status == "DONE"
+        finally:
+            if waiter is not None:
+                waiter.cancel()
+                await asyncio.gather(waiter, return_exceptions=True)
+            await transport.close()
+
+    asyncio.run(run())
