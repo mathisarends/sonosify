@@ -132,6 +132,7 @@ SonosController(
 
 | Method | Returns | Description |
 | --- | --- | --- |
+| `await close()` | `None` | Closes the shared HTTP pool opened by the controller context; also called on context exit |
 | `await discover()` | `SonosSystem` | Runs SSDP discovery, reads the zone group topology, caches the result on the controller |
 | `await client(room=None, *, ip=None, coordinator=True)` | `SonosClient` | Resolves a room name to a speaker and returns a client. Discovers on first use unless `ip` is given, which bypasses discovery entirely. `coordinator=True` redirects to the group coordinator, which is what transport commands must target |
 | `watch(room=None, *, ip=None, coordinator=True, services=..., callback_host=None, callback_port=0, timeout_seconds=300)` | async context manager → `EventSubscription` | Subscribes to live UPnP events for one speaker (see [Live events](#live-events)) |
@@ -145,6 +146,20 @@ Read-only properties: `timeout`, `discovery_timeout`, `include_invisible`, and
 
 Concurrent first calls to `client()` share one discovery. Call `discover()`
 explicitly to refresh the cached topology after grouping changes.
+
+For repeated commands, use the controller as an async context manager to reuse
+HTTP connections across its clients and shortcuts:
+
+```python
+async with SonosController() as sonos:
+    await sonos.set_volume(25, "Kitchen")
+    await sonos.play("Kitchen")
+```
+
+The shared HTTP pool closes when the context exits. Keep explicit clients and
+watchers inside that context and close them with their own `async with` blocks
+to release their WebSockets, clip servers, and subscriptions. Outside a
+controller context, clients keep their existing independent lifetimes.
 
 The module-level `discover()` function is exported too, if you want a
 `SonosSystem` without holding on to a controller:
@@ -166,7 +181,7 @@ discovery to pick up grouping changes.
 | `groups` | `tuple[Group, ...]` | Zone groups with their members |
 | `find(query=None, *, ip=None, include_invisible=False)` | `Speaker` | Resolves a room name: exact case-insensitive match first, then substring match. Raises `AmbiguousSpeakerError` on multiple substring hits, `SpeakerNotFoundError` on none. With no `query` it returns the only speaker, if there is exactly one |
 | `coordinator_for(speaker)` | `Speaker` | The group coordinator for a speaker, or the speaker itself when standalone |
-| `client(query=None, *, ip=None, coordinator=True, include_invisible=False)` | `SonosClient` | `find()` plus `SonosClient.from_speaker()` |
+| `client(query=None, *, ip=None, coordinator=True, include_invisible=False, http_client=None)` | `SonosClient` | `find()` plus `SonosClient.from_speaker()` |
 
 ### `SonosClient`
 
@@ -183,7 +198,7 @@ SonosClient(
     http_client: httpx.AsyncClient | None = None,  # inject to share a connection pool
 )
 
-SonosClient.from_speaker(speaker, *, timeout=15.0)  # classmethod
+SonosClient.from_speaker(speaker, *, timeout=15.0, http_client=None)  # classmethod
 ```
 
 Properties: `ip`, `port`, `uid`, `base_url`. Use it as an async context manager,

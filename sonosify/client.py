@@ -71,9 +71,19 @@ class SonosClient:
 
     @classmethod
     def from_speaker(
-        cls, speaker: Speaker, *, timeout: float = DEFAULT_TIMEOUT
+        cls,
+        speaker: Speaker,
+        *,
+        timeout: float = DEFAULT_TIMEOUT,
+        http_client: httpx.AsyncClient | None = None,
     ) -> Self:
-        return cls(speaker.ip, port=speaker.port, uid=speaker.uid, timeout=timeout)
+        return cls(
+            speaker.ip,
+            port=speaker.port,
+            uid=speaker.uid,
+            timeout=timeout,
+            http_client=http_client,
+        )
 
     @property
     def base_url(self) -> str:

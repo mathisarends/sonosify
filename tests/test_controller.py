@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
+import httpx
 import pytest
 
+import sonosify.client as client_module
 import sonosify.controller as controller_module
 from sonosify import AVTransportEvent, SonosController, TransportState
 from sonosify.errors import DiscoveryError
@@ -338,5 +340,77 @@ def test_failed_or_cancelled_first_discovery_allows_next_client_to_retry(
             await asyncio.gather(
                 first, *(() if second is None else (second,)), return_exceptions=True
             )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("direct_ip", [False, True])
+def test_controller_context_reuses_http_pool_across_commands(
+    monkeypatch: pytest.MonkeyPatch, direct_ip: bool
+) -> None:
+    calls: list[tuple[httpx.AsyncClient, str, str]] = []
+
+    async def soap(http, endpoint, service, action, args):  # type: ignore[no-untyped-def]
+        assert not http.is_closed
+        calls.append((http, endpoint, action))
+        return {}
+
+    monkeypatch.setattr(client_module, "soap_call", soap)
+
+    async def run() -> None:
+        controller = SonosController(timeout=3.0)
+        controller._system = SonosSystem(
+            (Speaker(ip="192.168.1.10", room_name="Kitchen", uid="k", port=1401),), ()
+        )
+        target = {"ip": "192.168.1.10"} if direct_ip else {"room": "Kitchen"}
+        async with controller as active:
+            assert active is controller
+            await active.play(**target)
+            shared = calls[0][0]
+            assert shared.timeout.connect == 3.0
+            assert not shared.is_closed
+            await active.pause(**target)
+            assert calls[1][0] is shared
+            async with await active.client(**target) as client:
+                assert client._http is shared
+                assert client.port == (1400 if direct_ip else 1401)
+            assert not shared.is_closed
+        assert shared.is_closed
+        await controller.close()
+        async with controller:
+            await controller.stop(**target)
+            assert calls[2][0] is not shared
+        assert calls[2][0].is_closed
+
+    asyncio.run(run())
+    assert [action for _, _, action in calls] == ["Play", "Pause", "Stop"]
+
+
+def test_controller_context_closes_shared_http_pool_on_error() -> None:
+    async def run() -> None:
+        controller = SonosController()
+        with pytest.raises(RuntimeError, match="command failed"):
+            async with controller:
+                client = await controller.client(ip="192.168.1.10")
+                shared = client._http
+                await client.close()
+                assert not shared.is_closed
+                raise RuntimeError("command failed")
+        assert shared.is_closed
+
+    asyncio.run(run())
+
+
+def test_nested_controller_context_does_not_close_outer_pool() -> None:
+    async def run() -> None:
+        controller = SonosController()
+        async with controller:
+            shared = controller._http
+            assert shared is not None
+            with pytest.raises(RuntimeError, match="already open"):
+                async with controller:
+                    pass
+            assert not shared.is_closed
+        assert shared.is_closed
 
     asyncio.run(run())

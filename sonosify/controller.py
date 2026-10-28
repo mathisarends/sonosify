@@ -1,6 +1,9 @@
 import asyncio
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
+from typing import Self
+
+import httpx
 
 from .client import DEFAULT_TIMEOUT, SonosClient
 from .discovery import _DEFAULT_DISCOVERY_TIMEOUT, discover
@@ -21,6 +24,21 @@ class SonosController:
         self._include_invisible = include_invisible
         self._system: SonosSystem | None = None
         self._discovery_lock = asyncio.Lock()
+        self._http: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> Self:
+        if self._http is not None:
+            raise RuntimeError("controller context is already open")
+        self._http = httpx.AsyncClient(timeout=self._timeout)
+        return self
+
+    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        http, self._http = self._http, None
+        if http is not None:
+            await http.aclose()
 
     @property
     def timeout(self) -> float:
@@ -54,7 +72,7 @@ class SonosController:
         coordinator: bool = True,
     ) -> SonosClient:
         if ip is not None:
-            return SonosClient(ip, timeout=self._timeout)
+            return SonosClient(ip, timeout=self._timeout, http_client=self._http)
         async with self._discovery_lock:
             system = self._system or await self.discover()
         return system.client(
@@ -62,6 +80,7 @@ class SonosController:
             ip=ip,
             coordinator=coordinator,
             include_invisible=self._include_invisible,
+            http_client=self._http,
         )
 
     @asynccontextmanager

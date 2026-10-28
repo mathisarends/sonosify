@@ -1,3 +1,5 @@
+import httpx
+
 from .client import DEFAULT_TIMEOUT, SonosClient
 from .errors import AmbiguousSpeakerError, SpeakerNotFoundError
 from .models import Group, Speaker
@@ -86,8 +88,11 @@ class SonosSystem:
         ip: str | None = None,
         coordinator: bool = True,
         include_invisible: bool = False,
+        http_client: httpx.AsyncClient | None = None,
     ) -> SonosClient:
         speaker = self.find(query, ip=ip, include_invisible=include_invisible)
         if coordinator:
             speaker = self.coordinator_for(speaker)
-        return SonosClient.from_speaker(speaker, timeout=self._timeout)
+        return SonosClient.from_speaker(
+            speaker, timeout=self._timeout, http_client=http_client
+        )
