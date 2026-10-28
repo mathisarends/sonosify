@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Self
 from xml.etree import ElementTree
 
-import httpx
+import httpx2
 
 from .._parsing import int_or_none, parse_headers
 from ..errors import SubscriptionError
@@ -48,7 +48,7 @@ class EventSubscription:
         self._callback_host = callback_host
         self._callback_port = callback_port
         self._timeout_seconds = timeout_seconds
-        self._http = httpx.AsyncClient(timeout=request_timeout)
+        self._http = httpx2.AsyncClient(timeout=request_timeout)
         self._events: asyncio.Queue[SonosEvent] = asyncio.Queue()
         self._router = EventRouter()
         self._server: asyncio.AbstractServer | None = None
@@ -137,14 +137,14 @@ class EventSubscription:
             # No player implements every service — a soundbar-only service such as
             # HTControl answers SUBSCRIBE with 503 on a speaker. Skip those instead
             # of failing the whole subscription.
-            rejected: httpx.HTTPError | None = None
+            rejected: httpx2.HTTPError | None = None
             for service in self._services:
                 callback_path = f"/sonosify/{service}/{uuid.uuid4().hex}"
                 self._callback_paths[callback_path] = service
                 self._callback_urls[service] = f"http://{host}:{port}{callback_path}"
                 try:
                     self._subscriptions[service] = await self._subscribe(service)
-                except httpx.HTTPError as exc:
+                except httpx2.HTTPError as exc:
                     rejected = exc
                     del self._callback_paths[callback_path]
                     del self._callback_urls[service]
@@ -179,7 +179,7 @@ class EventSubscription:
             self._renewals = None
 
         for service, sid in list(self._subscriptions.items()):
-            with contextlib.suppress(httpx.HTTPError):
+            with contextlib.suppress(httpx2.HTTPError):
                 await self._unsubscribe(service, sid)
         self._subscriptions.clear()
         self._callback_urls.clear()
@@ -302,7 +302,7 @@ class EventSubscription:
             return await self._request(
                 service, SID=sid, TIMEOUT=f"Second-{self._timeout_seconds}"
             )
-        except httpx.HTTPStatusError:
+        except httpx2.HTTPStatusError:
             # 412 once the player has forgotten the SID: start a fresh one.
             return await self._subscribe(service)
 

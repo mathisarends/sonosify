@@ -3,7 +3,7 @@ from collections.abc import Mapping
 from html import escape
 from xml.etree import ElementTree
 
-import httpx
+import httpx2
 
 from .errors import NetworkError, UPnPError
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 async def soap_call(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     endpoint_url: str,
     service_urn: str,
     action: str,
@@ -30,17 +30,17 @@ async def soap_call(
                 "SOAPACTION": f'"{service_urn}#{action}"',
             },
         )
-    except httpx.TimeoutException as exc:
+    except httpx2.TimeoutException as exc:
         raise NetworkError(f"request to {endpoint_url} timed out") from exc
-    except httpx.RequestError as exc:
+    except httpx2.RequestError as exc:
         raise NetworkError(f"request to {endpoint_url} failed: {exc}") from exc
     logger.debug(
         "<- %s %s#%s\n%s", response.status_code, service_urn, action, response.text
     )
-    if response.status_code == httpx.codes.OK:
+    if response.status_code == httpx2.codes.OK:
         return _parse_response(response.content)
 
-    if response.status_code == httpx.codes.INTERNAL_SERVER_ERROR:
+    if response.status_code == httpx2.codes.INTERNAL_SERVER_ERROR:
         error = _parse_upnp_error(response.content)
         if error is not None:
             raise error

@@ -7,7 +7,7 @@ from enum import StrEnum
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
-import httpx
+import httpx2
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ._parsing import local_name, parse_headers
@@ -162,7 +162,7 @@ def _local_ipv4_addresses() -> tuple[str, ...]:
 async def _speakers_from_locations(
     locations: Iterable[str], timeout: float
 ) -> tuple[Speaker, ...]:
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx2.AsyncClient(timeout=timeout) as client:
         tasks = [_speaker_from_location(client, location) for location in locations]
         results = await asyncio.gather(*tasks)
     speakers = {
@@ -172,13 +172,13 @@ async def _speakers_from_locations(
 
 
 async def _speaker_from_location(
-    client: httpx.AsyncClient, location: str
+    client: httpx2.AsyncClient, location: str
 ) -> Speaker | None:
     try:
         response = await client.get(location)
         response.raise_for_status()
         return _speaker_from_device_xml(location, response.text)
-    except (httpx.HTTPError, ElementTree.ParseError, ValueError):
+    except (httpx2.HTTPError, ElementTree.ParseError, ValueError):
         return None
 
 

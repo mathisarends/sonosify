@@ -1,6 +1,6 @@
 import asyncio
 
-import httpx
+import httpx2
 import pytest
 
 from sonosify.errors import NetworkError, UPnPError
@@ -8,18 +8,18 @@ from sonosify.soap import soap_call
 
 
 def _client(
-    handler: httpx.MockTransport | None = None, **kwargs: object
-) -> httpx.AsyncClient:
-    transport = handler or httpx.MockTransport(lambda request: httpx.Response(200))
-    return httpx.AsyncClient(transport=transport, **kwargs)
+    handler: httpx2.MockTransport | None = None, **kwargs: object
+) -> httpx2.AsyncClient:
+    transport = handler or httpx2.MockTransport(lambda request: httpx2.Response(200))
+    return httpx2.AsyncClient(transport=transport, **kwargs)
 
 
 def test_soap_call_sorts_and_escapes_envelope_args() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(
+        return httpx2.Response(
             200,
             text=(
                 '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
@@ -28,7 +28,7 @@ def test_soap_call_sorts_and_escapes_envelope_args() -> None:
         )
 
     async def run() -> None:
-        async with _client(httpx.MockTransport(handler)) as client:
+        async with _client(httpx2.MockTransport(handler)) as client:
             await soap_call(
                 client,
                 "http://host/Control",
@@ -45,9 +45,9 @@ def test_soap_call_sorts_and_escapes_envelope_args() -> None:
 
 
 def test_soap_call_parses_successful_response() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.headers["SOAPACTION"] == '"urn:test#GetVolume"'
-        return httpx.Response(
+        return httpx2.Response(
             200,
             text=(
                 '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
@@ -58,7 +58,7 @@ def test_soap_call_parses_successful_response() -> None:
         )
 
     async def run() -> dict[str, str]:
-        async with _client(httpx.MockTransport(handler)) as client:
+        async with _client(httpx2.MockTransport(handler)) as client:
             return await soap_call(
                 client, "http://host/Control", "urn:test", "GetVolume"
             )
@@ -67,8 +67,8 @@ def test_soap_call_parses_successful_response() -> None:
 
 
 def test_soap_call_raises_upnp_error_on_server_fault() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
             500,
             text=(
                 '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
@@ -81,7 +81,7 @@ def test_soap_call_raises_upnp_error_on_server_fault() -> None:
         )
 
     async def run() -> None:
-        async with _client(httpx.MockTransport(handler)) as client:
+        async with _client(httpx2.MockTransport(handler)) as client:
             await soap_call(client, "http://host/Control", "urn:test", "Play")
 
     with pytest.raises(UPnPError) as excinfo:
@@ -93,8 +93,8 @@ def test_soap_call_raises_upnp_error_on_server_fault() -> None:
 
 
 def test_soap_call_raises_http_error_when_fault_has_no_upnp_error() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
             500,
             text=(
                 '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
@@ -104,31 +104,31 @@ def test_soap_call_raises_http_error_when_fault_has_no_upnp_error() -> None:
         )
 
     async def run() -> None:
-        async with _client(httpx.MockTransport(handler)) as client:
+        async with _client(httpx2.MockTransport(handler)) as client:
             await soap_call(client, "http://host/Control", "urn:test", "Play")
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(httpx2.HTTPStatusError):
         asyncio.run(run())
 
 
 def test_soap_call_raises_http_error_for_unparseable_server_error() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, text="internal error")
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(500, text="internal error")
 
     async def run() -> None:
-        async with _client(httpx.MockTransport(handler)) as client:
+        async with _client(httpx2.MockTransport(handler)) as client:
             await soap_call(client, "http://host/Control", "urn:test", "Play")
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(httpx2.HTTPStatusError):
         asyncio.run(run())
 
 
 def test_soap_call_translates_network_timeout() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectTimeout("timed out", request=request)
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectTimeout("timed out", request=request)
 
     async def run() -> None:
-        async with _client(httpx.MockTransport(handler)) as client:
+        async with _client(httpx2.MockTransport(handler)) as client:
             await soap_call(client, "http://host/Control", "urn:test", "Play")
 
     with pytest.raises(NetworkError, match="timed out"):
@@ -136,11 +136,11 @@ def test_soap_call_translates_network_timeout() -> None:
 
 
 def test_soap_call_translates_other_request_errors() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused", request=request)
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("connection refused", request=request)
 
     async def run() -> None:
-        async with _client(httpx.MockTransport(handler)) as client:
+        async with _client(httpx2.MockTransport(handler)) as client:
             await soap_call(client, "http://host/Control", "urn:test", "Play")
 
     with pytest.raises(NetworkError, match="failed"):
@@ -148,19 +148,19 @@ def test_soap_call_translates_other_request_errors() -> None:
 
 
 def test_soap_call_returns_empty_dict_for_non_ok_success_status() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(204)
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(204)
 
     async def run() -> dict[str, str]:
-        async with _client(httpx.MockTransport(handler)) as client:
+        async with _client(httpx2.MockTransport(handler)) as client:
             return await soap_call(client, "http://host/Control", "urn:test", "Play")
 
     assert asyncio.run(run()) == {}
 
 
 def test_soap_call_raises_http_error_when_upnp_error_has_no_details() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
             500,
             text=(
                 '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
@@ -171,8 +171,8 @@ def test_soap_call_raises_http_error_when_upnp_error_has_no_details() -> None:
         )
 
     async def run() -> None:
-        async with _client(httpx.MockTransport(handler)) as client:
+        async with _client(httpx2.MockTransport(handler)) as client:
             await soap_call(client, "http://host/Control", "urn:test", "Play")
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(httpx2.HTTPStatusError):
         asyncio.run(run())

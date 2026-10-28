@@ -1,6 +1,6 @@
 import asyncio
 
-import httpx
+import httpx2
 import pytest
 
 import sonosify.client as client_module
@@ -17,7 +17,7 @@ class _RecordingSoap:
 
     async def __call__(
         self,
-        http: httpx.AsyncClient,
+        http: httpx2.AsyncClient,
         endpoint_url: str,
         service_urn: str,
         action: str,
@@ -361,11 +361,11 @@ def test_cancel_audio_clip_rejects_empty_clip_id() -> None:
 
 
 def test_player_id_wraps_http_errors_as_network_error() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500)
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(500)
 
     async def run() -> None:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as http:
             client = SonosClient("192.168.1.10", http_client=http)
             with pytest.raises(NetworkError, match="cannot read Sonos device identity"):
                 await client.cancel_audio_clip("clip-1")
@@ -374,11 +374,11 @@ def test_player_id_wraps_http_errors_as_network_error() -> None:
 
 
 def test_player_id_wraps_unparseable_xml_as_local_api_error() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text="not xml")
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, text="not xml")
 
     async def run() -> None:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as http:
             client = SonosClient("192.168.1.10", http_client=http)
             with pytest.raises(LocalAPIError, match="invalid device metadata"):
                 await client.cancel_audio_clip("clip-1")
@@ -387,8 +387,8 @@ def test_player_id_wraps_unparseable_xml_as_local_api_error() -> None:
 
 
 def test_player_id_raises_when_udn_missing() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
             200,
             text=(
                 '<root xmlns="urn:schemas-upnp-org:device-1-0"><device></device></root>'
@@ -396,7 +396,7 @@ def test_player_id_raises_when_udn_missing() -> None:
         )
 
     async def run() -> None:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as http:
             client = SonosClient("192.168.1.10", http_client=http)
             with pytest.raises(LocalAPIError, match="contains no UDN"):
                 await client.cancel_audio_clip("clip-1")
@@ -437,9 +437,9 @@ def test_local_audio_clip_resolves_player_id_from_configured_ip(
 ) -> None:
     calls: list[tuple[object, ...]] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.url.path == "/xml/device_description.xml"
-        return httpx.Response(
+        return httpx2.Response(
             200,
             text=(
                 '<root xmlns="urn:schemas-upnp-org:device-1-0"><device>'
@@ -461,7 +461,7 @@ def test_local_audio_clip_resolves_player_id_from_configured_ip(
     monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
 
     async def run() -> None:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as http:
             client = SonosClient("192.168.1.10", http_client=http)
             await client.play_audio_clip(app_id="com.example.agent", name="Chime")
             assert client.uid == "RINCON_DIRECT"
@@ -476,10 +476,10 @@ def test_local_audio_clip_resolves_player_id_from_configured_ip(
 def test_player_id_is_fetched_once_and_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     identity_requests = 0
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         nonlocal identity_requests
         identity_requests += 1
-        return httpx.Response(
+        return httpx2.Response(
             200,
             text=(
                 '<root xmlns="urn:schemas-upnp-org:device-1-0"><device>'
@@ -496,7 +496,7 @@ def test_player_id_is_fetched_once_and_cached(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", send_command)
 
     async def run() -> None:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as http:
             client = SonosClient("192.168.1.10", http_client=http)
             await client.cancel_audio_clip("clip-1")
             await client.cancel_audio_clip("clip-2")
@@ -508,7 +508,7 @@ def test_player_id_is_fetched_once_and_cached(monkeypatch: pytest.MonkeyPatch) -
 
 def test_close_leaves_externally_provided_http_client_open() -> None:
     async def run() -> bool:
-        http = httpx.AsyncClient()
+        http = httpx2.AsyncClient()
         client = SonosClient("192.168.1.10", http_client=http)
         await client.close()
         return http.is_closed
@@ -703,15 +703,15 @@ def test_enqueue_uri_with_play_selects_queue_before_seeking(
     recorder: _RecordingSoap, uid: str
 ) -> None:
     recorder._responses["AddURIToQueue"] = {"FirstTrackNumberEnqueued": "5"}
-    identity_requests: list[httpx.Request] = []
+    identity_requests: list[httpx2.Request] = []
 
-    def device_metadata(request: httpx.Request) -> httpx.Response:
+    def device_metadata(request: httpx2.Request) -> httpx2.Response:
         identity_requests.append(request)
-        return httpx.Response(200, text="<root><UDN>uuid:RINCON_1</UDN></root>")
+        return httpx2.Response(200, text="<root><UDN>uuid:RINCON_1</UDN></root>")
 
     async def run() -> int | None:
         async with (
-            httpx.AsyncClient(transport=httpx.MockTransport(device_metadata)) as http,
+            httpx2.AsyncClient(transport=httpx2.MockTransport(device_metadata)) as http,
             SonosClient("192.168.1.10", uid=uid, http_client=http) as client,
         ):
             return await client.enqueue_uri("http://stream", play=True)

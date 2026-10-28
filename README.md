@@ -195,7 +195,7 @@ SonosClient(
     port: int = 1400,
     uid: str = "",                              # RINCON uid; auto-fetched when needed
     timeout: float = 15.0,
-    http_client: httpx.AsyncClient | None = None,  # inject to share a connection pool
+    http_client: httpx2.AsyncClient | None = None,  # inject to share a connection pool
 )
 
 SonosClient.from_speaker(speaker, *, timeout=15.0, http_client=None)  # classmethod
@@ -204,6 +204,11 @@ SonosClient.from_speaker(speaker, *, timeout=15.0, http_client=None)  # classmet
 Properties: `ip`, `port`, `uid`, `base_url`. Use it as an async context manager,
 or call `await close()` yourself. A client constructed with an injected
 `http_client` does not close that client.
+
+HTTP client integrations now use `httpx2`. When upgrading from `httpx`, update
+injected clients to `httpx2.AsyncClient()` and catch `httpx2` exceptions.
+The packages define distinct client, response, and exception classes. HTTPX2
+also uses the operating system's certificate trust store for HTTPS by default.
 
 #### Transport control
 

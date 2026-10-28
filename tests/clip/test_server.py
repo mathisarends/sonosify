@@ -1,6 +1,6 @@
 import asyncio
 
-import httpx
+import httpx2
 
 from sonosify.clip.server import _STREAM_END, AudioClipServer
 
@@ -10,7 +10,7 @@ def test_clip_server_serves_audio_and_marks_it_fetched() -> None:
         server = AudioClipServer(host="127.0.0.1")
         try:
             token, fetched = server.add(b"wav-data", "audio/wav")
-            async with httpx.AsyncClient() as client:
+            async with httpx2.AsyncClient() as client:
                 await client.head(f"http://127.0.0.1:{server.port}/{token}")
                 assert fetched.is_set() is False
                 response = await client.get(f"http://127.0.0.1:{server.port}/{token}")
@@ -32,7 +32,7 @@ def test_clip_server_returns_not_found_after_removal() -> None:
         try:
             token, _ = server.add(b"audio", "audio/mpeg")
             server.remove(token)
-            async with httpx.AsyncClient() as client:
+            async with httpx2.AsyncClient() as client:
                 response = await client.get(f"http://127.0.0.1:{server.port}/{token}")
             return response.status_code
         finally:
@@ -49,7 +49,7 @@ def test_clip_server_streams_before_body_is_complete() -> None:
 
             async def read() -> tuple[bytes, str]:
                 async with (
-                    httpx.AsyncClient() as client,
+                    httpx2.AsyncClient() as client,
                     client.stream(
                         "GET", f"http://127.0.0.1:{server.port}/{token}"
                     ) as response,
@@ -83,12 +83,12 @@ def test_clip_server_rejects_a_second_stream_request() -> None:
         server = AudioClipServer(host="127.0.0.1")
         try:
             token, streamed = server.add_stream("audio/wav")
-            first = httpx.AsyncClient()
+            first = httpx2.AsyncClient()
             request = asyncio.create_task(
                 first.get(f"http://127.0.0.1:{server.port}/{token}")
             )
             await asyncio.wait_for(streamed.requested.wait(), timeout=1.0)
-            async with httpx.AsyncClient() as second:
+            async with httpx2.AsyncClient() as second:
                 response = await second.get(f"http://127.0.0.1:{server.port}/{token}")
             await streamed.queue.put(_STREAM_END)
             await request
@@ -104,7 +104,7 @@ def test_clip_server_close_unblocks_a_live_stream() -> None:
     async def run() -> None:
         server = AudioClipServer(host="127.0.0.1")
         token, streamed = server.add_stream("audio/wav")
-        client = httpx.AsyncClient()
+        client = httpx2.AsyncClient()
         request = asyncio.create_task(
             client.get(f"http://127.0.0.1:{server.port}/{token}")
         )

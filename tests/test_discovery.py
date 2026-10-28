@@ -4,7 +4,7 @@ import asyncio
 from html import escape
 from xml.etree import ElementTree
 
-import httpx
+import httpx2
 import pytest
 
 import sonosify.discovery as discovery_module
@@ -46,7 +46,7 @@ def _soap_response(body: str) -> str:
 
 
 class _FakeAsyncClient:
-    """Stands in for httpx.AsyncClient at the network boundary discover() uses."""
+    """Stands in for httpx2.AsyncClient at the network boundary discover() uses."""
 
     def __init__(self, handler, **kwargs: object) -> None:
         self._handler = handler
@@ -60,14 +60,16 @@ class _FakeAsyncClient:
     async def aclose(self) -> None:
         return None
 
-    async def get(self, url: str, **kwargs: object) -> httpx.Response:
+    async def get(self, url: str, **kwargs: object) -> httpx2.Response:
         response = self._handler("GET", url, None)
-        response.request = httpx.Request("GET", url)
+        response.request = httpx2.Request("GET", url)
         return response
 
-    async def post(self, url: str, *, content: str, **kwargs: object) -> httpx.Response:
+    async def post(
+        self, url: str, *, content: str, **kwargs: object
+    ) -> httpx2.Response:
         response = self._handler("POST", url, content)
-        response.request = httpx.Request("POST", url)
+        response.request = httpx2.Request("POST", url)
         return response
 
 
@@ -81,9 +83,9 @@ def _install_fake_network(
     def fake_ssdp_locations(timeout: float) -> set[str]:
         return locations
 
-    def handler(method: str, url: str, body: str | None) -> httpx.Response:
+    def handler(method: str, url: str, body: str | None) -> httpx2.Response:
         if method == "GET":
-            return httpx.Response(200, text=device_xml[url])
+            return httpx2.Response(200, text=device_xml[url])
         assert zone_group_state is not None, "unexpected SOAP call"
         response_body = (
             '<u:GetZoneGroupStateResponse xmlns:u="urn:schemas-upnp-org:'
@@ -91,11 +93,11 @@ def _install_fake_network(
             f"<ZoneGroupState>{escape(zone_group_state)}</ZoneGroupState>"
             "</u:GetZoneGroupStateResponse>"
         )
-        return httpx.Response(200, text=_soap_response(response_body))
+        return httpx2.Response(200, text=_soap_response(response_body))
 
     monkeypatch.setattr(discovery_module, "_ssdp_locations", fake_ssdp_locations)
     monkeypatch.setattr(
-        discovery_module.httpx,
+        discovery_module.httpx2,
         "AsyncClient",
         lambda **kwargs: _FakeAsyncClient(handler, **kwargs),
     )

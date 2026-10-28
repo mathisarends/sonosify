@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-import httpx
+import httpx2
 import pytest
 
 import sonosify.client as client_module
@@ -348,7 +348,7 @@ def test_failed_or_cancelled_first_discovery_allows_next_client_to_retry(
 def test_controller_context_reuses_http_pool_across_commands(
     monkeypatch: pytest.MonkeyPatch, direct_ip: bool
 ) -> None:
-    calls: list[tuple[httpx.AsyncClient, str, str]] = []
+    calls: list[tuple[httpx2.AsyncClient, str, str]] = []
 
     async def soap(http, endpoint, service, action, args):  # type: ignore[no-untyped-def]
         assert not http.is_closed

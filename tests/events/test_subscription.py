@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 from collections.abc import Callable
 
-import httpx
+import httpx2
 import pytest
 
 import sonosify.events.subscription as subscription_module
@@ -20,7 +20,7 @@ from sonosify.events import (
 
 
 class _FakeHttpClient:
-    """Stands in for the httpx.AsyncClient used for SUBSCRIBE/UNSUBSCRIBE."""
+    """Stands in for the httpx2.AsyncClient used for SUBSCRIBE/UNSUBSCRIBE."""
 
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, dict[str, str]]] = []
@@ -36,27 +36,27 @@ class _FakeHttpClient:
 
     async def request(
         self, method: str, url: str, *, headers: dict[str, str]
-    ) -> httpx.Response:
+    ) -> httpx2.Response:
         self.requests.append((method, url, headers))
-        request = httpx.Request(method, url)
+        request = httpx2.Request(method, url)
         if method != "SUBSCRIBE":
-            return httpx.Response(200, request=request)
+            return httpx2.Response(200, request=request)
         if self.failure is not None:
             raise self.failure
         if any(path in url for path in self.unimplemented):
-            raise httpx.HTTPStatusError(
+            raise httpx2.HTTPStatusError(
                 "service unavailable",
                 request=request,
-                response=httpx.Response(503, request=request),
+                response=httpx2.Response(503, request=request),
             )
         if "SID" in headers and self.renew_status != 200:
-            raise httpx.HTTPStatusError(
+            raise httpx2.HTTPStatusError(
                 "renewal rejected",
                 request=request,
-                response=httpx.Response(self.renew_status, request=request),
+                response=httpx2.Response(self.renew_status, request=request),
             )
         self._sid_counter += 1
-        return httpx.Response(
+        return httpx2.Response(
             200, headers={"SID": f"uuid:sub-{self._sid_counter}"}, request=request
         )
 
@@ -67,7 +67,9 @@ class _FakeHttpClient:
 @pytest.fixture
 def fake_http(monkeypatch: pytest.MonkeyPatch) -> _FakeHttpClient:
     fake = _FakeHttpClient()
-    monkeypatch.setattr(subscription_module.httpx, "AsyncClient", lambda **kwargs: fake)
+    monkeypatch.setattr(
+        subscription_module.httpx2, "AsyncClient", lambda **kwargs: fake
+    )
     monkeypatch.setattr(
         subscription_module, "_local_ip_for", lambda remote_ip: "127.0.0.1"
     )
@@ -313,7 +315,7 @@ def test_start_fails_when_no_service_accepts_the_subscription(
         asyncio.run(run())
 
     assert error.value.services == (EventService.HT_CONTROL,)
-    assert isinstance(error.value.__cause__, httpx.HTTPStatusError)
+    assert isinstance(error.value.__cause__, httpx2.HTTPStatusError)
 
 
 def test_skipped_service_is_not_renewed(
@@ -429,7 +431,7 @@ def test_renewal_loop_survives_transport_errors_and_recovers(
             "192.168.1.10", services=(EventService.AV_TRANSPORT,), timeout_seconds=0
         ) as subscription:
             await _until(lambda: bool(fake_http.renewals))
-            fake_http.failure = httpx.ConnectError("network is unreachable")
+            fake_http.failure = httpx2.ConnectError("network is unreachable")
             await _until(lambda: not subscription.connected)
             lost = subscription.failing_services == (EventService.AV_TRANSPORT,)
 
@@ -482,7 +484,7 @@ def test_connection_loss_and_recovery_are_delivered_as_events(
                 seen.append(event)
 
             dispatcher = asyncio.create_task(subscription.run())
-            fake_http.failure = httpx.ConnectError("network is unreachable")
+            fake_http.failure = httpx2.ConnectError("network is unreachable")
             await _until(lambda: bool(seen))
             fake_http.failure = None
             await _until(lambda: len(seen) > 1)
@@ -508,7 +510,7 @@ def test_connection_loss_is_reported_once_per_outage(
         async with EventSubscription(
             "192.168.1.10", services=(EventService.AV_TRANSPORT,), timeout_seconds=0
         ) as subscription:
-            fake_http.failure = httpx.ConnectError("network is unreachable")
+            fake_http.failure = httpx2.ConnectError("network is unreachable")
             await _until(lambda: not subscription.connected)
             attempts = len(fake_http.renewals)
             await _until(lambda: len(fake_http.renewals) > attempts + 3)

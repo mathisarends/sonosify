@@ -8,7 +8,7 @@ from typing import Self
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
-import httpx
+import httpx2
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ._parsing import int_or_none, local_name
@@ -59,13 +59,13 @@ class SonosClient:
         port: int = 1400,
         uid: str = "",
         timeout: float = DEFAULT_TIMEOUT,
-        http_client: httpx.AsyncClient | None = None,
+        http_client: httpx2.AsyncClient | None = None,
     ) -> None:
         self._ip = ip
         self._port = port
         self._uid = uid
         self._owns_client = http_client is None
-        self._http = http_client or httpx.AsyncClient(timeout=timeout)
+        self._http = http_client or httpx2.AsyncClient(timeout=timeout)
         self._audio_clip_websocket = AudioClipWebSocket(ip, timeout=timeout)
         self._audio_clip_server: AudioClipServer | None = None
 
@@ -75,7 +75,7 @@ class SonosClient:
         speaker: Speaker,
         *,
         timeout: float = DEFAULT_TIMEOUT,
-        http_client: httpx.AsyncClient | None = None,
+        http_client: httpx2.AsyncClient | None = None,
     ) -> Self:
         return cls(
             speaker.ip,
@@ -286,7 +286,7 @@ class SonosClient:
                 f"{self.base_url}/xml/device_description.xml"
             )
             response.raise_for_status()
-        except httpx.HTTPError as exc:
+        except httpx2.HTTPError as exc:
             raise NetworkError(
                 f"cannot read Sonos device identity from {self._ip}: {exc}"
             ) from exc
