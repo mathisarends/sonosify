@@ -28,6 +28,7 @@ class _FakeHttpClient:
         self.unimplemented: set[str] = set()
         self.failure: Exception | None = None
         self._sid_counter = 0
+        self.closed = False
 
     @property
     def renewals(self) -> list[tuple[str, str, dict[str, str]]]:
@@ -60,7 +61,7 @@ class _FakeHttpClient:
         )
 
     async def aclose(self) -> None:
-        return None
+        self.closed = True
 
 
 @pytest.fixture
@@ -634,3 +635,79 @@ async def _until(condition: Callable[[], bool], *, timeout: float = 2.0) -> None
             await asyncio.sleep(0.01)
 
     await asyncio.wait_for(wait(), timeout=timeout)
+
+
+@pytest.mark.parametrize("cancel_start", [False, True])
+def test_interrupted_start_cleans_up_partial_subscriptions(
+    fake_http: _FakeHttpClient, monkeypatch: pytest.MonkeyPatch, cancel_start: bool
+) -> None:
+    async def run() -> None:
+        blocked = asyncio.Event()
+        subscription = EventSubscription(
+            "192.168.1.10",
+            services=(EventService.AV_TRANSPORT, EventService.RENDERING_CONTROL),
+        )
+        subscribe = subscription._subscribe
+        startup_error = RuntimeError("startup failed")
+
+        async def subscribe_or_fail(service: EventService) -> str:
+            if service is EventService.RENDERING_CONTROL:
+                blocked.set()
+                if not cancel_start:
+                    raise startup_error
+                await asyncio.Event().wait()
+            return await subscribe(service)
+
+        monkeypatch.setattr(subscription, "_subscribe", subscribe_or_fail)
+        startup = asyncio.create_task(subscription.start())
+        try:
+            await asyncio.wait_for(blocked.wait(), timeout=1.0)
+            if cancel_start:
+                server = subscription._server
+                assert server is not None
+                startup.cancel()
+            with pytest.raises(
+                asyncio.CancelledError if cancel_start else RuntimeError
+            ) as error:
+                await startup
+            if cancel_start:
+                assert not server.is_serving()
+            else:
+                assert error.value is startup_error
+
+            assert subscription._server is None
+            assert subscription._renewals is None
+            assert subscription.subscribed_services == ()
+            assert subscription._callback_paths == {}
+            assert subscription._callback_urls == {}
+            assert fake_http.closed
+            unsubscribed = [
+                url for method, url, _ in fake_http.requests if method == "UNSUBSCRIBE"
+            ]
+            assert unsubscribed == [
+                "http://192.168.1.10:1400/MediaRenderer/AVTransport/Event"
+            ]
+        finally:
+            startup.cancel()
+            await asyncio.gather(startup, return_exceptions=True)
+            await subscription.close()
+
+    asyncio.run(run())
+
+
+def test_callback_server_start_failure_closes_http_client(
+    fake_http: _FakeHttpClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fail_to_bind(*args: object, **kwargs: object) -> None:
+        raise OSError("address already in use")
+
+    monkeypatch.setattr(subscription_module.asyncio, "start_server", fail_to_bind)
+
+    async def run() -> None:
+        subscription = EventSubscription("192.168.1.10", callback_host="127.0.0.1")
+        with pytest.raises(OSError, match="address already in use"):
+            await subscription.start()
+        assert fake_http.closed
+        assert subscription._server is None
+
+    asyncio.run(run())

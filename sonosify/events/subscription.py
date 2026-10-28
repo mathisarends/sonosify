@@ -125,37 +125,40 @@ class EventSubscription:
         if self._server is not None:
             return
 
-        callback_host = self._callback_host or await asyncio.to_thread(
-            _local_ip_for, self._ip
-        )
-        self._server = await asyncio.start_server(
-            self._handle_connection, callback_host, self._callback_port
-        )
-        host, port, *_ = self._server.sockets[0].getsockname()
+        try:
+            callback_host = self._callback_host or await asyncio.to_thread(
+                _local_ip_for, self._ip
+            )
+            self._server = await asyncio.start_server(
+                self._handle_connection, callback_host, self._callback_port
+            )
+            host, port, *_ = self._server.sockets[0].getsockname()
 
-        # No player implements every service — a soundbar-only service such as
-        # HTControl answers SUBSCRIBE with 503 on a speaker. Skip those instead
-        # of failing the whole subscription.
-        rejected: httpx.HTTPError | None = None
-        for service in self._services:
-            callback_path = f"/sonosify/{service}/{uuid.uuid4().hex}"
-            self._callback_paths[callback_path] = service
-            self._callback_urls[service] = f"http://{host}:{port}{callback_path}"
-            try:
-                self._subscriptions[service] = await self._subscribe(service)
-            except httpx.HTTPError as exc:
-                rejected = exc
-                del self._callback_paths[callback_path]
-                del self._callback_urls[service]
+            # No player implements every service — a soundbar-only service such as
+            # HTControl answers SUBSCRIBE with 503 on a speaker. Skip those instead
+            # of failing the whole subscription.
+            rejected: httpx.HTTPError | None = None
+            for service in self._services:
+                callback_path = f"/sonosify/{service}/{uuid.uuid4().hex}"
+                self._callback_paths[callback_path] = service
+                self._callback_urls[service] = f"http://{host}:{port}{callback_path}"
+                try:
+                    self._subscriptions[service] = await self._subscribe(service)
+                except httpx.HTTPError as exc:
+                    rejected = exc
+                    del self._callback_paths[callback_path]
+                    del self._callback_urls[service]
 
-        if not self._subscriptions:
+            if not self._subscriptions:
+                raise SubscriptionError(
+                    f"{self._ip} accepted no event subscription",
+                    services=self._services,
+                ) from rejected
+
+            self._renewals = asyncio.create_task(self._renew_forever())
+        except BaseException:
             await self.close()
-            raise SubscriptionError(
-                f"{self._ip} accepted no event subscription",
-                services=self._services,
-            ) from rejected
-
-        self._renewals = asyncio.create_task(self._renew_forever())
+            raise
 
     async def next_event(self, timeout: float | None = None) -> SonosEvent:
         if timeout is None:
@@ -179,6 +182,8 @@ class EventSubscription:
             with contextlib.suppress(httpx.HTTPError):
                 await self._unsubscribe(service, sid)
         self._subscriptions.clear()
+        self._callback_urls.clear()
+        self._callback_paths.clear()
         self._failures.clear()
 
         if self._server is not None:
