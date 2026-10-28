@@ -59,6 +59,11 @@ class AudioClipWebSocket:
                 async with asyncio.timeout(self._timeout):
                     await connection.send(payload)
                     return await response
+            except asyncio.CancelledError:
+                # Reconnect so a late reply cannot be mistaken for the next command.
+                response.cancel()
+                await self._discard()
+                raise
             except (OSError, TimeoutError, WebSocketException) as exc:
                 await self._discard()
                 raise NetworkError(

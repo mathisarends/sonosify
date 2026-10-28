@@ -309,3 +309,44 @@ def test_websocket_transport_accepts_event_before_command_response(
 
     assert response == {"id": "clip-1"}
     assert event.status == "DONE"
+
+
+@pytest.mark.parametrize("cancel_during_send", [False, True])
+def test_cancelled_command_discards_late_reply(
+    monkeypatch: pytest.MonkeyPatch, cancel_during_send: bool
+) -> None:
+    async def run() -> None:
+        sent = asyncio.Event()
+        first = _Connection()
+        second = _Connection('[{"success": true}, {"id": "clip-2"}]')
+        connections = iter((first, second))
+
+        async def send(payload: str) -> None:
+            first.sent.append(payload)
+            sent.set()
+            if cancel_during_send:
+                await asyncio.Event().wait()
+
+        async def connect(*args: object, **kwargs: object) -> _Connection:
+            return next(connections)
+
+        monkeypatch.setattr(first, "send", send)
+        monkeypatch.setattr(websocket_module, "connect", connect)
+        transport = AudioClipWebSocket("192.168.1.10", timeout=1.0)
+        try:
+            command = asyncio.create_task(
+                transport.send_command({"command": "loadAudioClip"})
+            )
+            await asyncio.wait_for(sent.wait(), timeout=1.0)
+            command.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await command
+
+            assert first.close_calls == 1
+            first.emit('[{"success": true}, {"id": "clip-1"}]')
+            result = await transport.send_command({"command": "loadAudioClip"})
+            assert result == {"id": "clip-2"}
+        finally:
+            await transport.close()
+
+    asyncio.run(run())
