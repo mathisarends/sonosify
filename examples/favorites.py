@@ -18,8 +18,8 @@ async def main() -> None:
     room = sys.argv[1]
     query = sys.argv[2] if len(sys.argv) > 2 else None
 
-    sonos = SonosController()
-    async with await sonos.client(room) as client:
+    async with SonosController() as sonos:
+        client = await sonos.speaker(room)
         favorites = await client.favorites()
 
         if query is None:

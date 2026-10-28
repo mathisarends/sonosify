@@ -16,9 +16,9 @@ async def main() -> None:
         raise SystemExit("usage: python examples/volume.py ROOM [VOLUME]")
 
     room = sys.argv[1]
-    sonos = SonosController()
 
-    async with await sonos.client(room, coordinator=False) as client:
+    async with SonosController() as sonos:
+        client = await sonos.speaker(room, coordinator=False)
         if len(sys.argv) > 2:
             await client.set_volume(int(sys.argv[2]))
 

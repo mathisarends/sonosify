@@ -67,12 +67,11 @@ from sonosify import SonosController
 
 
 async def main():
-    sonos = SonosController()
-    system = await sonos.discover()
+    async with SonosController() as sonos:
+        speakers = await sonos.speakers()
+        print([speaker.room_name for speaker in speakers])
 
-    print([speaker.room_name for speaker in system.speakers])
-
-    async with await sonos.client("Kitchen") as kitchen:
+        kitchen = await sonos.speaker("Kitchen")
         await kitchen.pause()
         await kitchen.set_volume(25)
         print(await kitchen.now_playing())
@@ -107,13 +106,14 @@ The public surface is fully async and built from three layers:
 | Topology | `SonosSystem` | Snapshot of speakers and groups; resolves a room name to a speaker |
 | Device | `SonosClient` | Every command against one speaker (UPnP/SOAP + local WebSocket) |
 
-`SonosController` is the normal entry point: it runs SSDP discovery once, keeps
-the resulting `SonosSystem`, and hands out `SonosClient` instances. Use
-`SonosClient` directly when you already know a speaker's IP address and want to
-skip discovery.
+`SonosController` is the normal entry point. Open it with `async with`; it
+lazily discovers speakers, caches the topology, and reuses one `SonosClient`
+per target device. It owns those clients and closes their HTTP connections,
+WebSockets, clip servers, and controller-created subscriptions on context exit.
 
-Both `SonosClient` and `EventSubscription` are async context managers and should
-be closed — `async with` handles that for you.
+For direct access, `await sonos.speaker(ip="192.168.1.42")` skips discovery.
+Standalone `SonosClient` instances and clients from `SonosSystem.client()`
+remain caller-owned: close them with their own `async with` blocks.
 
 ## API reference
 
@@ -132,34 +132,41 @@ SonosController(
 
 | Method | Returns | Description |
 | --- | --- | --- |
-| `await close()` | `None` | Closes the shared HTTP pool opened by the controller context; also called on context exit |
-| `await discover()` | `SonosSystem` | Runs SSDP discovery, reads the zone group topology, caches the result on the controller |
-| `await client(room=None, *, ip=None, coordinator=True)` | `SonosClient` | Resolves a room name to a speaker and returns a client. Discovers on first use unless `ip` is given, which bypasses discovery entirely. `coordinator=True` redirects to the group coordinator, which is what transport commands must target |
+| `await close()` | `None` | Closes all managed clients, active controller subscriptions, and the shared HTTP pool; also called on context exit |
+| `await discover()` | `SonosSystem` | Refreshes discovery and caches the resulting topology |
+| `await speakers()` | `tuple[Speaker, ...]` | Lists discovered speaker metadata; discovers on first use |
+| `await speaker(room=None, *, ip=None, coordinator=True)` | `SonosClient` | Resolves and reuses a managed client. Discovers on first named lookup; `ip` skips discovery. Pass either a room or an IP. `coordinator=True` redirects to the group coordinator for transport commands; use `False` to address an individual speaker |
 | `watch(room=None, *, ip=None, coordinator=True, services=..., callback_host=None, callback_port=0, timeout_seconds=300)` | async context manager → `EventSubscription` | Subscribes to live UPnP events for one speaker (see [Live events](#live-events)) |
-| `await play(room=None, *, ip=None)` | `None` | One-shot shortcut: open a client, send the command, close it |
-| `await pause(room=None, *, ip=None)` | `None` | As above |
-| `await stop(room=None, *, ip=None)` | `None` | As above |
-| `await set_volume(volume, room=None, *, ip=None)` | `None` | As above, but targets the individual speaker (`coordinator=False`) |
+| `await play(room=None, *, ip=None)` | `None` | Plays through a managed client, reusing its connections |
+| `await pause(room=None, *, ip=None)` | `None` | Pauses through a managed client |
+| `await stop(room=None, *, ip=None)` | `None` | Stops through a managed client |
+| `await set_volume(volume, room=None, *, ip=None)` | `None` | Sets the individual speaker volume (`coordinator=False`) |
 
 Read-only properties: `timeout`, `discovery_timeout`, `include_invisible`, and
 `system` (the cached `SonosSystem`, or `None` before the first discovery).
 
-Concurrent first calls to `client()` share one discovery. Call `discover()`
-explicitly to refresh the cached topology after grouping changes.
-
-For repeated commands, use the controller as an async context manager to reuse
-HTTP connections across its clients and shortcuts:
+All controller operations require an open `async with SonosController()`
+context. Concurrent first calls to `speaker()` and `speakers()` share one
+discovery. Call `discover()` explicitly to refresh the topology after grouping
+changes. Room aliases resolving to the same device return the same client;
+manually closing one makes the next lookup create a fresh client.
 
 ```python
 async with SonosController() as sonos:
-    await sonos.set_volume(25, "Kitchen")
-    await sonos.play("Kitchen")
+    kitchen = await sonos.speaker("Kitchen")
+    await kitchen.pause()
+    await kitchen.set_volume(25)
 ```
 
-The shared HTTP pool closes when the context exits. Keep explicit clients and
-watchers inside that context and close them with their own `async with` blocks
-to release their WebSockets, clip servers, and subscriptions. Outside a
-controller context, clients keep their existing independent lifetimes.
+Keep managed speaker handles inside the controller context. They close when
+it exits and reject further commands. A controller can be opened again with a
+fresh topology and connections. `watch()` still has its own subscription
+context; leaving it keeps the managed speaker's connections available.
+
+**Migrating from the previous API:** rename `await sonos.client(...)` to
+`await sonos.speaker(...)`, move `async with` to the controller, and remove the
+per-speaker context. `SonosSystem.client()` and direct `SonosClient` usage keep
+their existing lifetimes.
 
 The module-level `discover()` function is exported too, if you want a
 `SonosSystem` without holding on to a controller:
@@ -313,8 +320,8 @@ from sonosify import ClipPriority, ClipType, SonosController
 
 
 async def main():
-    sonos = SonosController()
-    async with await sonos.client("Kitchen") as kitchen:
+    async with SonosController() as sonos:
+        kitchen = await sonos.speaker("Kitchen")
         clip = await kitchen.play_audio_clip(
             "http://192.168.1.50:8000/tts/response.mp3",
             app_id="com.example.voice-agent",
@@ -465,8 +472,10 @@ from sonosify import AVTransportEvent, RenderingControlEvent, SonosController
 
 
 async def main():
-    sonos = SonosController()
-    async with sonos.watch("Kitchen") as watcher:
+    async with (
+        SonosController() as sonos,
+        sonos.watch("Kitchen") as watcher,
+    ):
 
         @watcher.on(AVTransportEvent)
         def transport(event):
@@ -493,8 +502,9 @@ async for event in watcher:
             print(state)
 ```
 
-`SonosController.watch()` is the convenient form; `SonosClient.watch()` returns
-the same `EventSubscription` for a client you already hold.
+`SonosController.watch()` manages the subscription within the open controller.
+`SonosClient.watch()` returns a caller-owned `EventSubscription`; use its own
+`async with` block to unsubscribe and release the callback server.
 
 | Member | Description |
 | --- | --- |

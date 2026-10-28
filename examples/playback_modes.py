@@ -24,9 +24,9 @@ async def main() -> None:
         )
 
     room, setting, value = sys.argv[1], sys.argv[2], sys.argv[3]
-    sonos = SonosController()
 
-    async with await sonos.client(room) as client:
+    async with SonosController() as sonos:
+        client = await sonos.speaker(room)
         match setting:
             case "shuffle":
                 result = await client.set_shuffle(value == "on")

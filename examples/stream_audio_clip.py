@@ -126,17 +126,16 @@ async def _main(args: argparse.Namespace) -> None:
     target = f"IP {args.ip}" if args.ip else f"room {args.room or '(default)'}"
     _report(started, f"resolving {target}")
 
-    controller = SonosController()
-    client = await controller.client(args.room, ip=args.ip)
-    _report(started, f"player ready at {client.ip}")
+    async with SonosController() as sonos:
+        client = await sonos.speaker(args.room, ip=args.ip)
+        _report(started, f"player ready at {client.ip}")
 
-    chunks = _simulated_tts(
-        duration=args.duration,
-        chunk_seconds=args.chunk,
-        delivery_rate=args.delivery_rate,
-        first_chunk_delay=args.first_chunk_delay,
-    )
-    async with client:
+        chunks = _simulated_tts(
+            duration=args.duration,
+            chunk_seconds=args.chunk,
+            delivery_rate=args.delivery_rate,
+            first_chunk_delay=args.first_chunk_delay,
+        )
         await _stream_audio(
             client,
             chunks,

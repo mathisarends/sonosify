@@ -12,8 +12,8 @@ from sonosify import SonosController
 
 async def main() -> None:
     room = sys.argv[1] if len(sys.argv) > 1 else None
-    sonos = SonosController()
-    async with await sonos.client(room) as client:
+    async with SonosController() as sonos:
+        client = await sonos.speaker(room)
         state = await client.now_playing()
 
     print(state.state)

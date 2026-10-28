@@ -25,8 +25,8 @@ async def main() -> None:
             '(quote room names with spaces, e.g. "Sonos Era 100")'
         )
 
-    sonos = SonosController()
-    async with await sonos.client(room) as client:
+    async with SonosController() as sonos:
+        client = await sonos.speaker(room)
         await client.play_uri(stream_url, radio=True, title=title)
 
 

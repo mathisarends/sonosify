@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import functools
 from collections.abc import Sequence
+from contextlib import AsyncExitStack
 from typing import Self
 from xml.etree import ElementTree
 
@@ -61,6 +62,7 @@ class SonosClient:
         self._ip = ip
         self._port = port
         self._uid = uid
+        self._closed = False
         self._owns_client = http_client is None
         self._http = http_client or httpx2.AsyncClient(timeout=timeout)
         self._audio_clip_websocket = AudioClipWebSocket(ip, timeout=timeout)
@@ -98,15 +100,24 @@ class SonosClient:
     def uid(self) -> str:
         return self._uid
 
+    @property
+    def is_closed(self) -> bool:
+        return self._closed
+
     async def close(self) -> None:
-        await self._audio_clip_websocket.close()
-        if self._audio_clip_server is not None:
-            await asyncio.to_thread(self._audio_clip_server.close)
-            self._audio_clip_server = None
-        if self._owns_client:
-            await self._http.aclose()
+        if self._closed:
+            return
+        self._closed = True
+        server, self._audio_clip_server = self._audio_clip_server, None
+        async with AsyncExitStack() as cleanup:
+            if self._owns_client:
+                cleanup.push_async_callback(self._http.aclose)
+            if server is not None:
+                cleanup.push_async_callback(asyncio.to_thread, server.close)
+            cleanup.push_async_callback(self._audio_clip_websocket.close)
 
     async def __aenter__(self) -> Self:
+        self._ensure_open()
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -276,6 +287,7 @@ class SonosClient:
         )
 
     async def _get_or_fetch_player_id(self) -> str:
+        self._ensure_open()
         if self._uid:
             return self._uid
         try:
@@ -299,6 +311,7 @@ class SonosClient:
         raise LocalAPIError("player device metadata contains no UDN")
 
     def _ensure_audio_clip_server(self) -> AudioClipServer:
+        self._ensure_open()
         if self._audio_clip_server is None:
             self._audio_clip_server = AudioClipServer()
         return self._audio_clip_server
@@ -575,6 +588,7 @@ class SonosClient:
         callback_port: int = 0,
         timeout_seconds: int = 300,
     ) -> EventSubscription:
+        self._ensure_open()
         return EventSubscription(
             self._ip,
             port=self._port,
@@ -624,6 +638,7 @@ class SonosClient:
     async def _soap(
         self, service: _UPnPService, action: str, **args: object
     ) -> dict[str, str]:
+        self._ensure_open()
         return await soap_call(
             self._http,
             f"{self.base_url}{service.control_path}",
@@ -640,3 +655,7 @@ class SonosClient:
         if self._uid:
             return self._uid
         raise ValueError("line-in playback requires a source Speaker or RINCON uid")
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("speaker client is closed")

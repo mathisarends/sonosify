@@ -23,9 +23,10 @@ from sonosify import (
 
 async def main() -> None:
     room = sys.argv[1] if len(sys.argv) > 1 else None
-    sonos = SonosController()
-
-    async with sonos.watch(room, services=ALL_SERVICES) as watcher:
+    async with (
+        SonosController() as sonos,
+        sonos.watch(room, services=ALL_SERVICES) as watcher,
+    ):
 
         @watcher.on(AVTransportEvent)
         def transport(event: AVTransportEvent) -> None:

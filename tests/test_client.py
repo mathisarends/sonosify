@@ -1204,3 +1204,52 @@ def test_set_repeat_accepts_shared_enum_and_preserves_shuffle(
     client = SonosClient("192.168.1.10")
     assert _run(client.set_repeat(repeat)) == expected_mode
     assert recorder.calls[-1][3]["NewPlayMode"] == expected_mode
+
+
+@pytest.mark.parametrize("operation", ["soap", "clip", "watch", "context"])
+def test_closed_client_rejects_further_use(operation: str) -> None:
+    async def run() -> None:
+        client = SonosClient("192.168.1.10", uid="known-player")
+        assert not client.is_closed
+        await client.close()
+        await client.close()
+        assert client.is_closed
+        with pytest.raises(RuntimeError, match="client is closed"):
+            match operation:
+                case "soap":
+                    await client.pause()
+                case "clip":
+                    await client.play_audio_clip(app_id="com.example.test")
+                case "watch":
+                    client.watch()
+                case "context":
+                    async with client:
+                        pass
+
+    asyncio.run(run())
+
+
+def test_close_releases_http_and_clip_server_if_websocket_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[str] = []
+
+    class Server:
+        def close(self) -> None:
+            closed.append("server")
+
+    async def close(self: object) -> None:
+        raise RuntimeError("websocket close failed")
+
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "close", close)
+
+    async def run() -> None:
+        client = SonosClient("192.168.1.10")
+        client._audio_clip_server = Server()  # type: ignore[assignment]
+        with pytest.raises(RuntimeError, match="websocket close failed"):
+            await client.close()
+        assert closed == ["server"]
+        assert client.is_closed and client._http.is_closed
+        await client.close()
+
+    asyncio.run(run())
