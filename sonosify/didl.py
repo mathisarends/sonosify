@@ -1,6 +1,7 @@
 from html import escape
 from xml.etree import ElementTree
 
+from ._parsing import _element_text, _find_element, _local_name
 from .models import Favorite, Track
 
 _DIDL_NS = "urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"
@@ -20,15 +21,15 @@ def parse_track_metadata(
     except ElementTree.ParseError:
         return Track(uri=uri, duration=duration, position=position)
 
-    item = _first(root, "item")
+    item = _find_element(root, "item")
     if item is None:
         item = root
     return Track(
-        title=_text(item, "title"),
-        creator=_text(item, "creator"),
-        album=_text(item, "album"),
-        uri=uri or _text(item, "res"),
-        album_art_uri=_text(item, "albumArtURI"),
+        title=_element_text(item, "title"),
+        creator=_element_text(item, "creator"),
+        album=_element_text(item, "album"),
+        uri=uri or _element_text(item, "res"),
+        album_art_uri=_element_text(item, "albumArtURI"),
         duration=duration,
         position=position,
     )
@@ -49,10 +50,10 @@ def parse_favorites(metadata: str) -> list[Favorite]:
             continue
         favorites.append(
             Favorite(
-                title=_text(item, "title"),
-                uri=_text(item, "res"),
+                title=_element_text(item, "title"),
+                uri=_element_text(item, "res"),
                 metadata=ElementTree.tostring(item, encoding="unicode"),
-                album_art_uri=_text(item, "albumArtURI"),
+                album_art_uri=_element_text(item, "albumArtURI"),
             )
         )
     return favorites
@@ -84,19 +85,3 @@ def radio_metadata(title: str, uri: str) -> str:
         "</item>"
         "</DIDL-Lite>"
     )
-
-
-def _first(root: ElementTree.Element, local_name: str) -> ElementTree.Element | None:
-    for element in root.iter():
-        if _local_name(element.tag) == local_name:
-            return element
-    return None
-
-
-def _text(root: ElementTree.Element, local_name: str) -> str:
-    element = _first(root, local_name)
-    return "" if element is None or element.text is None else element.text.strip()
-
-
-def _local_name(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]

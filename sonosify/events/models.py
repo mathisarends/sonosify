@@ -4,7 +4,7 @@ from typing import Annotated, ClassVar, Literal, NamedTuple
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from ..didl import parse_track_metadata
-from ..models import Track
+from ..models import PlayMode, Track, TransportState
 
 
 class EventService(StrEnum):
@@ -24,25 +24,6 @@ class EventService(StrEnum):
     SYSTEM_PROPERTIES = "system_properties"
     VIRTUAL_LINE_IN = "virtual_line_in"
     ZONE_GROUP_TOPOLOGY = "zone_group_topology"
-
-
-class TransportState(StrEnum):
-    STOPPED = "STOPPED"
-    PLAYING = "PLAYING"
-    TRANSITIONING = "TRANSITIONING"
-    PAUSED_PLAYBACK = "PAUSED_PLAYBACK"
-    PAUSED_RECORDING = "PAUSED_RECORDING"
-    RECORDING = "RECORDING"
-    NO_MEDIA_PRESENT = "NO_MEDIA_PRESENT"
-
-
-class PlayMode(StrEnum):
-    NORMAL = "NORMAL"
-    REPEAT_ALL = "REPEAT_ALL"
-    REPEAT_ONE = "REPEAT_ONE"
-    SHUFFLE_NOREPEAT = "SHUFFLE_NOREPEAT"
-    SHUFFLE = "SHUFFLE"
-    SHUFFLE_REPEAT_ONE = "SHUFFLE_REPEAT_ONE"
 
 
 type RawEventValues = dict[str, str]

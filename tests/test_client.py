@@ -4,7 +4,7 @@ import httpx2
 import pytest
 
 import sonosify.client as client_module
-from sonosify import ClipStatus, Favorite, Speaker
+from sonosify import ClipStatus, Favorite, RepeatMode, Speaker
 from sonosify.client import PositionInfo, SonosClient, TransportInfo
 from sonosify.errors import LocalAPIError, NetworkError
 from sonosify.events import EventSubscription
@@ -1038,6 +1038,18 @@ def test_get_zone_group_state_and_room_name(recorder: _RecordingSoap) -> None:
 
     assert _run(client.get_zone_group_state()) == "<state/>"
     assert _run(client.get_room_name()) == "Kitchen"
+    assert [call[:3] for call in recorder.calls] == [
+        (
+            "http://192.168.1.10:1400/ZoneGroupTopology/Control",
+            "urn:schemas-upnp-org:service:ZoneGroupTopology:1",
+            "GetZoneGroupState",
+        ),
+        (
+            "http://192.168.1.10:1400/DeviceProperties/Control",
+            "urn:schemas-upnp-org:service:DeviceProperties:1",
+            "GetZoneAttributes",
+        ),
+    ]
 
 
 def test_duck_sends_player_volume_command(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1175,3 +1187,20 @@ def test_now_playing_cleans_up_requests_on_failure_or_cancellation(
                 await asyncio.gather(pending, return_exceptions=True)
 
     _run(run())
+
+
+@pytest.mark.parametrize(
+    ("repeat", "expected_mode"),
+    [
+        (RepeatMode.OFF, "SHUFFLE_NOREPEAT"),
+        (RepeatMode.ONE, "SHUFFLE_REPEAT_ONE"),
+        (RepeatMode.ALL, "SHUFFLE"),
+    ],
+)
+def test_set_repeat_accepts_shared_enum_and_preserves_shuffle(
+    recorder: _RecordingSoap, repeat: RepeatMode, expected_mode: str
+) -> None:
+    recorder._responses["GetTransportSettings"] = {"PlayMode": "SHUFFLE_NOREPEAT"}
+    client = SonosClient("192.168.1.10")
+    assert _run(client.set_repeat(repeat)) == expected_mode
+    assert recorder.calls[-1][3]["NewPlayMode"] == expected_mode

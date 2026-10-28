@@ -10,6 +10,7 @@ from websockets.exceptions import WebSocketException
 from websockets.protocol import State
 from websockets.typing import Subprotocol
 
+from .._protocol import _ControlNamespace
 from ..errors import LocalAPIError, NetworkError
 from .models import AudioClip
 
@@ -80,7 +81,7 @@ class AudioClipWebSocket:
             return
         await self.send_command(
             {
-                "namespace": "audioClip:1",
+                "namespace": _ControlNamespace.AUDIO_CLIP,
                 "command": "subscribe",
                 "playerId": player_id,
             }

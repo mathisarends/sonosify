@@ -64,9 +64,20 @@ uv run pytest
 
 ## Project layout
 
-- `sonosify/` — the core async library (discovery, client, events, models)
+- `sonosify/client.py` — speaker commands and client lifecycle
+- `sonosify/models.py` — shared data models and playback enums
+- `sonosify/_protocol.py` — internal UPnP routes, Control API namespaces and payloads
+- `sonosify/_parsing.py` — shared internal XML, header, and scalar parsing helpers
+- `sonosify/_playback.py` — internal shuffle/repeat mapping
+- `sonosify/clip/` — audio clip models, validation, serving, and streaming
+- `sonosify/events/` — event models, parsing, routing, and subscriptions
 - `examples/` — small runnable scripts demonstrating the core API
 - `tests/` — the test suite
+
+Internal modules and their helper functions use `_` names. Keep transport
+response models with the other shared models instead of adding them to the
+client. Add protocol routes to the service catalog so paths and URNs stay
+paired.
 
 ## Making changes
 

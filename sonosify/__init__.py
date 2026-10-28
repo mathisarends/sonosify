@@ -1,4 +1,4 @@
-from .client import PositionInfo, SonosClient, TransportInfo
+from .client import SonosClient
 from .clip import (
     AudioClip,
     AudioClipStream,
@@ -36,7 +36,6 @@ from .events import (
     GroupRenderingControlEvent,
     HTControlEvent,
     MusicServicesEvent,
-    PlayMode,
     QueueEvent,
     RendererConnectionManagerEvent,
     RenderingControlEvent,
@@ -45,12 +44,22 @@ from .events import (
     SubscriptionLost,
     SubscriptionRestored,
     SystemPropertiesEvent,
-    TransportState,
     UnknownSonosEvent,
     VirtualLineInEvent,
     ZoneGroupTopologyEvent,
 )
-from .models import Favorite, Group, PlaybackState, Speaker, Track
+from .models import (
+    Favorite,
+    Group,
+    PlaybackState,
+    PlayMode,
+    PositionInfo,
+    RepeatMode,
+    Speaker,
+    Track,
+    TransportInfo,
+    TransportState,
+)
 from .topology import SonosSystem
 
 __all__ = [
@@ -87,6 +96,7 @@ __all__ = [
     "QueueEvent",
     "RendererConnectionManagerEvent",
     "RenderingControlEvent",
+    "RepeatMode",
     "ServerConnectionManagerEvent",
     "SonosClient",
     "SonosController",

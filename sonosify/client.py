@@ -3,15 +3,14 @@ from __future__ import annotations
 import asyncio
 import functools
 from collections.abc import Sequence
-from enum import StrEnum
 from typing import Self
-from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 import httpx2
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ._parsing import int_or_none, local_name
+from ._parsing import _local_name
+from ._playback import _play_mode, _repeat_from_play_mode
+from ._protocol import _ControlNamespace, _duck_options, _UPnPService
 from .clip import (
     AudioClip,
     AudioClipStream,
@@ -20,6 +19,7 @@ from .clip import (
     ClipType,
     HostedAudioClip,
 )
+from .clip._validation import _validate_audio_clip_arguments
 from .clip.server import AudioClipServer, _local_ip_for
 from .clip.websocket import AudioClipWebSocket
 from .didl import (
@@ -33,22 +33,19 @@ from .events import (
     DEFAULT_SERVICES,
     EventService,
     EventSubscription,
-    TransportState,
 )
-from .models import Favorite, PlaybackState, Speaker, Track
+from .models import (
+    Favorite,
+    PlaybackState,
+    PositionInfo,
+    RepeatMode,
+    Speaker,
+    Track,
+    TransportInfo,
+)
 from .soap import soap_call
 
 DEFAULT_TIMEOUT = 15.0
-
-_AV_TRANSPORT = "urn:schemas-upnp-org:service:AVTransport:1"
-_RENDERING_CONTROL = "urn:schemas-upnp-org:service:RenderingControl:1"
-_GROUP_RENDERING_CONTROL = "urn:schemas-upnp-org:service:GroupRenderingControl:1"
-_CONTENT_DIRECTORY = "urn:schemas-upnp-org:service:ContentDirectory:1"
-_DEVICE_PROPERTIES = "urn:schemas-upnp-org:service:DeviceProperties:1"
-_ZONE_GROUP_TOPOLOGY = "urn:schemas-upnp-org:service:ZoneGroupTopology:1"
-
-_PLAYER_VOLUME_NAMESPACE = "playerVolume:1"
-_MAX_DUCK_DURATION_MILLIS = 60_000
 
 
 class SonosClient:
@@ -153,7 +150,7 @@ class SonosClient:
         player_id = await self._get_or_fetch_player_id()
         result = await self._audio_clip_websocket.send_command(
             {
-                "namespace": "audioClip:1",
+                "namespace": _ControlNamespace.AUDIO_CLIP,
                 "command": "loadAudioClip",
                 "playerId": player_id,
             },
@@ -220,7 +217,7 @@ class SonosClient:
         player_id = await self._get_or_fetch_player_id()
         await self._audio_clip_websocket.send_command(
             {
-                "namespace": "audioClip:1",
+                "namespace": _ControlNamespace.AUDIO_CLIP,
                 "command": "cancelAudioClip",
                 "playerId": player_id,
             },
@@ -295,7 +292,7 @@ class SonosClient:
         except ElementTree.ParseError as exc:
             raise LocalAPIError("player returned invalid device metadata") from exc
         for element in root.iter():
-            if local_name(element.tag) == "UDN" and element.text:
+            if _local_name(element.tag) == "UDN" and element.text:
                 self._uid = element.text.strip().removeprefix("uuid:")
                 if self._uid:
                     return self._uid
@@ -307,33 +304,33 @@ class SonosClient:
         return self._audio_clip_server
 
     async def play(self) -> None:
-        await self.__av_transport("Play", Speed="1")
+        await self._av_transport("Play", Speed="1")
 
     async def pause(self) -> None:
-        await self.__av_transport("Pause")
+        await self._av_transport("Pause")
 
     async def stop(self) -> None:
-        await self.__av_transport("Stop")
+        await self._av_transport("Stop")
 
     async def next(self) -> None:
-        await self.__av_transport("Next")
+        await self._av_transport("Next")
 
     async def previous(self) -> None:
-        await self.__av_transport("Previous")
+        await self._av_transport("Previous")
 
     async def seek_queue(self, position: int) -> None:
-        await self.__av_transport("Seek", Unit="TRACK_NR", Target=str(position))
+        await self._av_transport("Seek", Unit="TRACK_NR", Target=str(position))
 
     async def seek(self, position: str) -> None:
         """Seek to an ``H:MM:SS`` position within the current track."""
-        await self.__av_transport("Seek", Unit="REL_TIME", Target=position)
+        await self._av_transport("Seek", Unit="REL_TIME", Target=position)
 
     async def get_play_mode(self) -> str:
-        result = await self.__av_transport("GetTransportSettings")
+        result = await self._av_transport("GetTransportSettings")
         return result.get("PlayMode", "NORMAL")
 
     async def set_play_mode(self, mode: str) -> None:
-        await self.__av_transport("SetPlayMode", NewPlayMode=mode.upper())
+        await self._av_transport("SetPlayMode", NewPlayMode=mode.upper())
 
     async def set_shuffle(self, enabled: bool) -> str:
         current = await self.get_play_mode()
@@ -342,24 +339,24 @@ class SonosClient:
         await self.set_play_mode(mode)
         return mode
 
-    async def set_repeat(self, repeat: _RepeatMode | str) -> str:
-        repeat = _RepeatMode(repeat)
+    async def set_repeat(self, repeat: RepeatMode | str) -> str:
+        repeat = RepeatMode(repeat)
         current = await self.get_play_mode()
         mode = _play_mode(current.startswith("SHUFFLE"), repeat)
         await self.set_play_mode(mode)
         return mode
 
     async def get_crossfade(self) -> bool:
-        result = await self.__av_transport("GetCrossfadeMode")
+        result = await self._av_transport("GetCrossfadeMode")
         return result.get("CrossfadeMode") == "1"
 
     async def set_crossfade(self, enabled: bool) -> None:
-        await self.__av_transport(
+        await self._av_transport(
             "SetCrossfadeMode", CrossfadeMode="1" if enabled else "0"
         )
 
     async def configure_sleep_timer(self, duration: str | None) -> None:
-        await self.__av_transport(
+        await self._av_transport(
             "ConfigureSleepTimer", NewSleepTimerDuration=duration or ""
         )
 
@@ -367,7 +364,7 @@ class SonosClient:
         if radio:
             uri = radio_uri(uri)
         metadata = radio_metadata(title or uri, uri) if radio else ""
-        await self.__av_transport(
+        await self._av_transport(
             "SetAVTransportURI", CurrentURI=uri, CurrentURIMetaData=metadata
         )
         await self.play()
@@ -394,7 +391,7 @@ class SonosClient:
         next_: bool = False,
         play: bool = False,
     ) -> int | None:
-        result = await self.__av_transport(
+        result = await self._av_transport(
             "AddURIToQueue",
             EnqueuedURI=uri,
             EnqueuedURIMetaData=metadata,
@@ -405,7 +402,7 @@ class SonosClient:
         position = int(value) if value and value.isdigit() else None
         if play and position is not None:
             player_id = await self._get_or_fetch_player_id()
-            await self.__av_transport(
+            await self._av_transport(
                 "SetAVTransportURI",
                 CurrentURI=f"x-rincon-queue:{player_id}#0",
                 CurrentURIMetaData="",
@@ -470,24 +467,17 @@ class SonosClient:
         return muted
 
     async def duck(self, duration_millis: int | None = None) -> None:
-        options: dict[str, object] = {}
-        if duration_millis is not None:
-            if not 1 <= duration_millis <= _MAX_DUCK_DURATION_MILLIS:
-                raise ValueError(
-                    f"duration_millis must be between 1 and {_MAX_DUCK_DURATION_MILLIS}"
-                )
-            options["durationMillis"] = duration_millis
-        await self._player_volume("duck", options)
+        await self._player_volume("duck", _duck_options(duration_millis))
 
     async def unduck(self) -> None:
         await self._player_volume("unduck", {})
 
     async def get_transport_info(self) -> TransportInfo:
-        result = await self.__av_transport("GetTransportInfo")
+        result = await self._av_transport("GetTransportInfo")
         return TransportInfo.model_validate(result)
 
     async def get_position_info(self) -> PositionInfo:
-        result = await self.__av_transport("GetPositionInfo")
+        result = await self._av_transport("GetPositionInfo")
         return PositionInfo.model_validate(result)
 
     async def now_playing(self) -> PlaybackState:
@@ -517,7 +507,7 @@ class SonosClient:
         )
 
     async def queue(self, *, start: int = 0, count: int = 100) -> list[Track]:
-        result = await self.__content_directory(
+        result = await self._content_directory(
             "Browse",
             ObjectID="Q:0",
             BrowseFlag="BrowseDirectChildren",
@@ -541,13 +531,13 @@ class SonosClient:
         return tracks
 
     async def clear_queue(self) -> None:
-        await self.__av_transport("RemoveAllTracksFromQueue")
+        await self._av_transport("RemoveAllTracksFromQueue")
 
     async def remove_queue_item(self, position: int) -> None:
-        await self.__av_transport("RemoveTrackFromQueue", ObjectID=f"Q:0/{position}")
+        await self._av_transport("RemoveTrackFromQueue", ObjectID=f"Q:0/{position}")
 
     async def favorites(self) -> list[Favorite]:
-        result = await self.__content_directory(
+        result = await self._content_directory(
             "Browse",
             ObjectID="FV:2",
             BrowseFlag="BrowseDirectChildren",
@@ -559,7 +549,7 @@ class SonosClient:
         return parse_favorites(result.get("Result", ""))
 
     async def open_favorite(self, favorite: Favorite) -> None:
-        await self.__av_transport(
+        await self._av_transport(
             "SetAVTransportURI",
             CurrentURI=favorite.uri,
             CurrentURIMetaData=favorite.metadata,
@@ -568,14 +558,14 @@ class SonosClient:
 
     async def join(self, coordinator: Speaker | str) -> None:
         coordinator_uid = self._source_uid(coordinator)
-        await self.__av_transport(
+        await self._av_transport(
             "SetAVTransportURI",
             CurrentURI=f"x-rincon:{coordinator_uid}",
             CurrentURIMetaData="",
         )
 
     async def unjoin(self) -> None:
-        await self.__av_transport("BecomeCoordinatorOfStandaloneGroup")
+        await self._av_transport("BecomeCoordinatorOfStandaloneGroup")
 
     def watch(
         self,
@@ -595,34 +585,23 @@ class SonosClient:
         )
 
     async def get_zone_group_state(self) -> str:
-        result = await self._soap(
-            "/ZoneGroupTopology/Control", _ZONE_GROUP_TOPOLOGY, "GetZoneGroupState"
-        )
+        result = await self._soap(_UPnPService.ZONE_GROUP_TOPOLOGY, "GetZoneGroupState")
         return result.get("ZoneGroupState", "")
 
     async def get_room_name(self) -> str:
-        result = await self._soap(
-            "/DeviceProperties/Control", _DEVICE_PROPERTIES, "GetZoneAttributes"
-        )
+        result = await self._soap(_UPnPService.DEVICE_PROPERTIES, "GetZoneAttributes")
         return result.get("CurrentZoneName", "")
 
-    async def __av_transport(self, action: str, **args: object) -> dict[str, str]:
-        kwargs = {
-            "InstanceID": "0",
-            **args,
-        }
+    async def _av_transport(self, action: str, **args: object) -> dict[str, str]:
         return await self._soap(
-            path="/MediaRenderer/AVTransport/Control",
-            service_urn=_AV_TRANSPORT,
-            action=action,
-            **kwargs,
+            _UPnPService.AV_TRANSPORT, action, InstanceID="0", **args
         )
 
     async def _player_volume(self, command: str, options: dict[str, object]) -> None:
         player_id = await self._get_or_fetch_player_id()
         await self._audio_clip_websocket.send_command(
             {
-                "namespace": _PLAYER_VOLUME_NAMESPACE,
+                "namespace": _ControlNamespace.PLAYER_VOLUME,
                 "command": command,
                 "playerId": player_id,
             },
@@ -630,44 +609,27 @@ class SonosClient:
         )
 
     async def _rendering(self, action: str, **args: object) -> dict[str, str]:
-        kwargs = {
-            "InstanceID": "0",
-            **args,
-        }
         return await self._soap(
-            path="/MediaRenderer/RenderingControl/Control",
-            service_urn=_RENDERING_CONTROL,
-            action=action,
-            **kwargs,
+            _UPnPService.RENDERING_CONTROL, action, InstanceID="0", **args
         )
 
     async def _group_rendering(self, action: str, **args: object) -> dict[str, str]:
         return await self._soap(
-            path="/MediaRenderer/GroupRenderingControl/Control",
-            service_urn=_GROUP_RENDERING_CONTROL,
-            action=action,
-            InstanceID="0",
-            **args,
+            _UPnPService.GROUP_RENDERING_CONTROL, action, InstanceID="0", **args
         )
 
-    async def __content_directory(self, action: str, **args: object) -> dict[str, str]:
-        kwargs = {**args}
-        return await self._soap(
-            path="/MediaServer/ContentDirectory/Control",
-            service_urn=_CONTENT_DIRECTORY,
-            action=action,
-            **kwargs,
-        )
+    async def _content_directory(self, action: str, **args: object) -> dict[str, str]:
+        return await self._soap(_UPnPService.CONTENT_DIRECTORY, action, **args)
 
     async def _soap(
-        self,
-        path: str,
-        service_urn: str,
-        action: str,
-        **args: object,
+        self, service: _UPnPService, action: str, **args: object
     ) -> dict[str, str]:
         return await soap_call(
-            self._http, f"{self.base_url}{path}", service_urn, action, args
+            self._http,
+            f"{self.base_url}{service.control_path}",
+            service.urn,
+            action,
+            args,
         )
 
     def _source_uid(self, source: Speaker | str | None) -> str:
@@ -678,91 +640,3 @@ class SonosClient:
         if self._uid:
             return self._uid
         raise ValueError("line-in playback requires a source Speaker or RINCON uid")
-
-
-class TransportInfo(BaseModel):
-    """Typed view of the AVTransport GetTransportInfo response."""
-
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-
-    state: TransportState | None = Field(None, alias="CurrentTransportState")
-    status: str = Field("", alias="CurrentTransportStatus")
-    speed: str = Field("", alias="CurrentSpeed")
-
-    @field_validator("state", mode="before")
-    @classmethod
-    def _coerce_state(cls, value: object) -> object:
-        if not isinstance(value, str):
-            return value
-        try:
-            return TransportState(value)
-        except ValueError:
-            return None
-
-
-class PositionInfo(BaseModel):
-    """Typed view of the AVTransport GetPositionInfo response."""
-
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-
-    track: int | None = Field(None, alias="Track")
-    track_uri: str = Field("", alias="TrackURI")
-    track_duration: str = Field("", alias="TrackDuration")
-    track_metadata: str = Field("", alias="TrackMetaData")
-    relative_time: str = Field("", alias="RelTime")
-    absolute_time: str = Field("", alias="AbsTime")
-
-    @field_validator("track", mode="before")
-    @classmethod
-    def _coerce_track(cls, value: object) -> object:
-        return int_or_none(value) if isinstance(value, str) else value
-
-
-class _RepeatMode(StrEnum):
-    OFF = "off"
-    ONE = "one"
-    ALL = "all"
-
-
-def _validate_audio_clip_arguments(
-    *,
-    stream_url: str | None,
-    app_id: str,
-    name: str,
-    volume: int | None,
-    http_authorization: str | None,
-) -> None:
-    if not 1 <= len(name) <= 64:
-        raise ValueError("audio clip name must contain 1 to 64 characters")
-    if not app_id or len(app_id) > 127:
-        raise ValueError("app_id must contain 1 to 127 characters")
-    if volume is not None and not 0 <= volume <= 100:
-        raise ValueError("audio clip volume must be between 0 and 100")
-    if stream_url is not None:
-        parsed = urlparse(stream_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("stream_url must be an absolute HTTP(S) URL")
-    if http_authorization is not None and len(http_authorization.encode()) > 512:
-        raise ValueError("http_authorization must contain at most 512 bytes")
-
-
-def _repeat_from_play_mode(mode: str) -> _RepeatMode:
-    if mode.endswith("REPEAT_ONE"):
-        return _RepeatMode.ONE
-    if mode in {"REPEAT_ALL", "SHUFFLE"}:
-        return _RepeatMode.ALL
-    return _RepeatMode.OFF
-
-
-def _play_mode(shuffle: bool, repeat: _RepeatMode) -> str:
-    if shuffle:
-        return {
-            _RepeatMode.OFF: "SHUFFLE_NOREPEAT",
-            _RepeatMode.ONE: "SHUFFLE_REPEAT_ONE",
-            _RepeatMode.ALL: "SHUFFLE",
-        }[repeat]
-    return {
-        _RepeatMode.OFF: "NORMAL",
-        _RepeatMode.ONE: "REPEAT_ONE",
-        _RepeatMode.ALL: "REPEAT_ALL",
-    }[repeat]

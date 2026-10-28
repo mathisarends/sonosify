@@ -9,7 +9,7 @@ from xml.etree import ElementTree
 
 import httpx2
 
-from .._parsing import int_or_none, parse_headers
+from .._parsing import _int_or_none, _parse_headers
 from ..errors import SubscriptionError
 from .models import (
     DEFAULT_SERVICES,
@@ -213,9 +213,9 @@ class EventSubscription:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         raw_headers = await reader.readuntil(b"\r\n\r\n")
-        request_line, headers = parse_headers(raw_headers.decode(errors="ignore"))
+        request_line, headers = _parse_headers(raw_headers.decode(errors="ignore"))
         method, path, *_ = (*request_line.split(), "", "")
-        length = int_or_none(headers.get("content-length")) or 0
+        length = _int_or_none(headers.get("content-length")) or 0
         body = await reader.readexactly(length) if length > 0 else b""
 
         if method.upper() != "NOTIFY":
@@ -231,7 +231,7 @@ class EventSubscription:
                         body,
                         service=self._callback_paths.get(path, "unknown"),
                         sid=headers.get("sid", ""),
-                        sequence=int_or_none(headers.get("seq")),
+                        sequence=_int_or_none(headers.get("seq")),
                     )
                 )
             except (ElementTree.ParseError, ValueError) as error:

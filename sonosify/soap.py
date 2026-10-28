@@ -5,6 +5,7 @@ from xml.etree import ElementTree
 
 import httpx2
 
+from ._parsing import _find_element, _local_name
 from .errors import NetworkError, UPnPError
 
 _SOAP_ENV_NS = "http://schemas.xmlsoap.org/soap/envelope/"
@@ -67,7 +68,7 @@ def _build_envelope(
 
 def _parse_response(raw: str | bytes) -> dict[str, str]:
     root = ElementTree.fromstring(raw)
-    body = _find_by_local_name(root, "Body")
+    body = _find_element(root, "Body")
     if body is None or not list(body):
         return {}
 
@@ -83,7 +84,7 @@ def _parse_upnp_error(raw: str | bytes) -> UPnPError | None:
     except ElementTree.ParseError:
         return None
 
-    upnp = _find_by_local_name(root, "UPnPError")
+    upnp = _find_element(root, "UPnPError")
     if upnp is None:
         return None
 
@@ -98,19 +99,6 @@ def _parse_upnp_error(raw: str | bytes) -> UPnPError | None:
     if not code and not description:
         return None
     return UPnPError(code=code, description=description)
-
-
-def _find_by_local_name(
-    root: ElementTree.Element, local_name: str
-) -> ElementTree.Element | None:
-    for element in root.iter():
-        if _local_name(element.tag) == local_name:
-            return element
-    return None
-
-
-def _local_name(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
 
 
 def _safe_tag(tag: str) -> str:

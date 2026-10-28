@@ -10,7 +10,7 @@ from xml.etree import ElementTree
 import httpx2
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ._parsing import local_name, parse_headers
+from ._parsing import _element_text, _find_element, _local_name, _parse_headers
 from .client import DEFAULT_TIMEOUT, SonosClient
 from .errors import DiscoveryError
 from .models import Group, Speaker
@@ -135,7 +135,7 @@ def _ssdp_locations(timeout: float) -> set[str]:
                     data, _ = sock.recvfrom(65535)
                 except BlockingIOError:
                     continue
-                _, headers = parse_headers(data.decode(errors="ignore"))
+                _, headers = _parse_headers(data.decode(errors="ignore"))
                 location = headers.get("location")
                 if location:
                     locations.add(location)
@@ -185,13 +185,13 @@ async def _speaker_from_location(
 def _speaker_from_device_xml(location: str, xml_text: str) -> Speaker:
     parsed = urlparse(location)
     root = ElementTree.fromstring(xml_text)
-    device = _first(root, _DeviceTag.DEVICE)
+    device = _find_element(root, _DeviceTag.DEVICE)
     if device is None:
         device = root
-    room = _text(device, _DeviceTag.ROOM_NAME) or _text(
+    room = _element_text(device, _DeviceTag.ROOM_NAME) or _element_text(
         device, _DeviceTag.FRIENDLY_NAME
     )
-    uid = _text(device, _DeviceTag.UDN).removeprefix(_UUID_PREFIX)
+    uid = _element_text(device, _DeviceTag.UDN).removeprefix(_UUID_PREFIX)
     return Speaker(
         ip=parsed.hostname or "", port=parsed.port or 1400, room_name=room, uid=uid
     )
@@ -227,12 +227,12 @@ def _parse_topology(
     groups: list[Group] = []
     try:
         for zone_group in root.iter():
-            if local_name(zone_group.tag) != _ZoneTag.GROUP:
+            if _local_name(zone_group.tag) != _ZoneTag.GROUP:
                 continue
             group_data = _ZoneGroupAttributes.model_validate(zone_group.attrib)
             members: list[Speaker] = []
             for member in list(zone_group):
-                if local_name(member.tag) != _ZoneTag.MEMBER:
+                if _local_name(member.tag) != _ZoneTag.MEMBER:
                     continue
                 member_data = _ZoneGroupMemberAttributes.model_validate(member.attrib)
                 parsed_location = urlparse(member_data.location)
@@ -270,15 +270,3 @@ def _groups_from_speakers(speakers: tuple[Speaker, ...]) -> tuple[Group, ...]:
         )
         for speaker in speakers
     )
-
-
-def _first(root: ElementTree.Element, name: str) -> ElementTree.Element | None:
-    for element in root.iter():
-        if local_name(element.tag) == name:
-            return element
-    return None
-
-
-def _text(root: ElementTree.Element, name: str) -> str:
-    element = _first(root, name)
-    return "" if element is None or element.text is None else element.text.strip()

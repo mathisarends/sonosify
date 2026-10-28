@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from html import escape
-from xml.etree import ElementTree
 
 import httpx2
 import pytest
@@ -420,12 +419,6 @@ def test_parse_topology_skips_non_member_children() -> None:
     speakers, groups = result
     assert {speaker.uid for speaker in speakers} == {"speaker-1"}
     assert groups[0].members[0].uid == "speaker-1"
-
-
-def test_first_returns_none_when_tag_is_absent() -> None:
-    root = ElementTree.fromstring("<root><a/></root>")
-
-    assert discovery_module._first(root, "missing") is None
 
 
 def test_ssdp_searches_all_local_ipv4_interfaces(

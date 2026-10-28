@@ -1,6 +1,6 @@
 from xml.etree import ElementTree
 
-from .._parsing import local_name
+from .._parsing import _local_name
 from .models import (
     RawEventValues,
     SonosEvent,
@@ -35,7 +35,7 @@ def parse_last_change(raw: str) -> RawEventValues:
         return {}
     values: RawEventValues = {}
     for element in ElementTree.fromstring(raw).iter():
-        name = local_name(element.tag)
+        name = _local_name(element.tag)
         value = element.attrib.get("val")
         if value is None or name in _LAST_CHANGE_CONTAINERS:
             continue
@@ -49,10 +49,10 @@ def parse_last_change(raw: str) -> RawEventValues:
 def _property_values(raw: str | bytes) -> RawEventValues:
     values: RawEventValues = {}
     for property_element in ElementTree.fromstring(raw).iter():
-        if local_name(property_element.tag) != "property":
+        if _local_name(property_element.tag) != "property":
             continue
         for child in property_element:
-            name = local_name(child.tag)
+            name = _local_name(child.tag)
             text = child.text or ""
             if name == "LastChange":
                 values.update(parse_last_change(text))

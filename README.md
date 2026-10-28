@@ -274,7 +274,7 @@ shuffle preserves repeat and vice versa.
 | `await get_play_mode()` | `str` | Raw mode, e.g. `NORMAL`, `SHUFFLE`, `REPEAT_ONE` |
 | `await set_play_mode(mode)` | `None` | Sets the raw mode |
 | `await set_shuffle(enabled)` | `str` | Toggles shuffle, keeps repeat; returns the resulting mode |
-| `await set_repeat(repeat)` | `str` | Takes `"off"` / `"one"` / `"all"`, keeps shuffle; returns the resulting mode |
+| `await set_repeat(repeat)` | `str` | Takes `RepeatMode` or `"off"` / `"one"` / `"all"`, keeps shuffle; returns the resulting mode |
 | `await get_crossfade()` / `await set_crossfade(enabled)` | `bool` / `None` | Crossfade between tracks |
 | `await configure_sleep_timer(duration)` | `None` | `"H:MM:SS"` string, or `None` to cancel |
 
@@ -588,7 +588,12 @@ field holds the `Master` channel and the other channels stay in `values` under
 
 ### Data models
 
-All models are frozen Pydantic models.
+Data models and shared playback enums live in `sonosify.models` and are also
+importable from `sonosify`. Existing imports of `TransportInfo` and
+`PositionInfo` from `sonosify.client`, and `TransportState` and `PlayMode` from
+`sonosify.events`, remain supported. `RepeatMode` names the `off`, `one`, and
+`all` options accepted by `set_repeat()`. All data models are frozen Pydantic
+models.
 
 | Model | Fields |
 | --- | --- |
