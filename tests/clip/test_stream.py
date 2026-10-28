@@ -60,7 +60,7 @@ def test_stream_defers_load_until_prebuffer_threshold() -> None:
     loads, queued, status = asyncio.run(run())
 
     assert loads == ["load"]
-    assert queued == b"abc"
+    assert queued == b"abcdef"
     assert status is ClipStatus.DONE
 
 
@@ -207,8 +207,7 @@ def test_stream_close_rejects_later_writes() -> None:
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("prebuffer_bytes", [0, 33])
-def test_abort_unblocks_a_writer_with_a_full_buffer(prebuffer_bytes: int) -> None:
+def test_abort_unblocks_a_writer_with_a_full_buffer() -> None:
     async def run() -> None:
         server = AudioClipServer(host="127.0.0.1")
         cancellations: list[str] = []
@@ -224,7 +223,7 @@ def test_abort_unblocks_a_writer_with_a_full_buffer(prebuffer_bytes: int) -> Non
             websocket=_WebSocket(),  # type: ignore[arg-type]
             load=lambda: asyncio.sleep(0, result=_clip()),
             cancel=cancel,
-            prebuffer_bytes=prebuffer_bytes,
+            prebuffer_bytes=0,
         )
         writer: asyncio.Task[None] | None = None
         try:
@@ -346,6 +345,37 @@ def test_interrupted_completion_wait_leaves_stream_writable(cancel_wait: bool) -
             if waiter is not None:
                 waiter.cancel()
                 await asyncio.gather(waiter, return_exceptions=True)
+            server.close()
+
+    asyncio.run(run())
+
+
+def test_prebuffer_is_available_before_load_and_can_exceed_queue_capacity() -> None:
+    async def run() -> None:
+        server = AudioClipServer(host="127.0.0.1")
+        token, streamed = server.add_stream("audio/wav")
+        received = []
+
+        async def load() -> AudioClip:
+            received.append(streamed.queue.get_nowait())
+            return _clip()
+
+        handle = AudioClipStream(
+            streamed=streamed,
+            server=server,
+            token=token,
+            websocket=_WebSocket(),  # type: ignore[arg-type]
+            load=load,
+            cancel=lambda clip_id: asyncio.sleep(0),
+            prebuffer_bytes=64,
+        )
+        try:
+            for _ in range(64):
+                await asyncio.wait_for(handle.write(b"a"), timeout=1.0)
+            assert received == [b"a" * 64]
+            assert handle.id == "clip-1"
+        finally:
+            handle.close()
             server.close()
 
     asyncio.run(run())

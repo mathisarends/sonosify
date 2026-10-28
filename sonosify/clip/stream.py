@@ -106,10 +106,11 @@ class AudioClipStream:
 
     async def _start(self) -> None:
         try:
-            self._clip = await self._load()
-            for chunk in self._prefix:
-                await self._put(chunk)
+            # Make buffered audio available before the player can request it.
+            prefix = b"".join(self._prefix)
             self._prefix.clear()
+            await self._put(prefix)
+            self._clip = await self._load()
         except BaseException:
             self._prefix.clear()
             self._server.remove(self._token)
@@ -118,6 +119,13 @@ class AudioClipStream:
     async def _put(self, item: bytes | object) -> None:
         if self._streamed.disconnected.is_set():
             raise NetworkError("Sonos player disconnected from audio clip stream")
+        if self._streamed.closed.is_set() or self._streamed.unavailable.is_set():
+            raise NetworkError("audio clip stream was closed")
+        try:
+            self._streamed.queue.put_nowait(item)
+            return
+        except asyncio.QueueFull:
+            pass
         put = asyncio.create_task(self._streamed.queue.put(item))
         unavailable = asyncio.create_task(self._streamed.unavailable.wait())
         try:

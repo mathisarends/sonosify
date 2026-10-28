@@ -1,4 +1,5 @@
 import asyncio
+import socket
 
 import httpx2
 
@@ -112,5 +113,33 @@ def test_clip_server_close_unblocks_a_live_stream() -> None:
         await asyncio.wait_for(asyncio.to_thread(server.close), timeout=1.0)
         await asyncio.gather(request, return_exceptions=True)
         await client.aclose()
+
+    asyncio.run(run())
+
+
+def test_audio_stream_socket_disables_nagle(monkeypatch) -> None:
+    async def run() -> None:
+        server = AudioClipServer(host="127.0.0.1")
+        token, streamed = server.add_stream("audio/wav")
+        handler = server._server.RequestHandlerClass
+        serve = handler._stream
+        nodelay = []
+
+        def inspect_socket(request, audio):
+            nodelay.append(
+                request.connection.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY)
+            )
+            return serve(request, audio)
+
+        monkeypatch.setattr(handler, "_stream", inspect_socket)
+        try:
+            await streamed.queue.put(b"pcm")
+            await streamed.queue.put(_STREAM_END)
+            async with httpx2.AsyncClient() as client:
+                response = await client.get(f"http://127.0.0.1:{server.port}/{token}")
+            assert response.content == b"pcm"
+            assert nodelay == [1]
+        finally:
+            server.close()
 
     asyncio.run(run())

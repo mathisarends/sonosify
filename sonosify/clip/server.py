@@ -110,6 +110,7 @@ class AudioClipServer:
 
         class _Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+            disable_nagle_algorithm = True
 
             def _lookup(self) -> _HostedAudio | _StreamedAudio | None:
                 with lock:
@@ -183,9 +184,8 @@ class AudioClipServer:
                             self.wfile.flush()
                             return
                         assert isinstance(item, bytes)
-                        self.wfile.write(f"{len(item):X}\r\n".encode("ascii"))
-                        self.wfile.write(item)
-                        self.wfile.write(b"\r\n")
+                        frame = f"{len(item):X}\r\n".encode("ascii") + item + b"\r\n"
+                        self.wfile.write(frame)
                         self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     streamed.loop.call_soon_threadsafe(streamed.disconnected.set)

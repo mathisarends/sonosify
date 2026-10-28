@@ -45,10 +45,15 @@ async def _simulated_tts(
 ) -> AsyncIterator[bytes]:
     """Yield PCM like a TTS provider that produces audio faster than realtime."""
     chunk_count = math.ceil(duration / chunk_seconds)
+    started = perf_counter()
     for index in range(chunk_count):
-        delay = first_chunk_delay if index == 0 else chunk_seconds / delivery_rate
-        await asyncio.sleep(delay)
-        yield _tone(chunk_seconds, 440 + index % 5 * 80)
+        deadline = started + first_chunk_delay + index * chunk_seconds / delivery_rate
+        delay = deadline - perf_counter()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        yield _tone(
+            min(chunk_seconds, duration - index * chunk_seconds), 440 + index % 5 * 80
+        )
 
 
 def _report(started: float, message: str) -> None:
@@ -152,7 +157,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--chunk", type=float, default=0.25)
     parser.add_argument("--delivery-rate", type=float, default=2.0)
     parser.add_argument("--first-chunk-delay", type=float, default=0.4)
-    parser.add_argument("--prebuffer", type=float, default=1.5)
+    parser.add_argument("--prebuffer", type=float, default=0.1)
     parser.add_argument("--volume", type=int)
     return parser.parse_args()
 

@@ -401,6 +401,53 @@ you can wait again, or call `abort()` to stop it. Stream data is released when
 completion is confirmed or the stream or client is closed. The public clip
 types and helpers are also importable from `sonosify.clip`.
 
+#### Low-latency Realtime PCM
+
+For an existing Realtime PCM stream, forward decoded
+[`response.output_audio.delta`](https://developers.openai.com/api/docs/guides/realtime-conversations#working-with-audio-output-from-a-websocket)
+bytes without writing a temporary file. End the input iterator at
+`response.output_audio.done`; cancel the forwarding task to interrupt a turn.
+
+Keep one `SonosClient` open across responses, and create the stream and write
+its WAV header before waiting for the first PCM chunk. This overlaps the
+identity lookup, WebSocket handshake, and HTTP fetch with model generation.
+Use `prebuffer_bytes=0` for minimum added startup delay. Increase it only when
+your producer needs more protection against delivery gaps.
+
+[`examples/realtime_pcm_clip.py`](examples/realtime_pcm_clip.py) accepts raw
+24 kHz mono signed 16-bit little-endian PCM. It incrementally converts it to
+48 kHz stereo WAV using a stateful linear interpolator and duplicated channels.
+The example needs no extra DSP dependency and preserves speech pitch and
+duration. The output uses four times the PCM bandwidth (192 kB/s instead of
+48 kB/s). It uses `ClipType.CUSTOM`, which was accepted by the tested Era 100.
+
+Measurements on one Sonos Era 100 on 2026-10-28, with 20 ms chunks delivered at
+realtime speed and an already primed HTTP stream (three trials each):
+
+| Path | Median first PCM to reported `ACTIVE` |
+| --- | --- |
+| Original 24 kHz mono stream, no prebuffer | 357 ms |
+| 24 kHz stereo format comparison, no prebuffer | 174 ms |
+| 24 kHz mono through the 48 kHz stereo example | 91 ms |
+
+These are player-status timestamps, not microphone measurements of audible
+onset, and exclude model generation time. The format results suggest a
+byte-based startup buffer on this device; they do not establish a fixed
+latency guarantee for other players or firmware. With the `SonosClient`
+already constructed, preparing the stream took about 200–240 ms on first use
+and about 1 ms on later uses. The stream
+write path was reduced from about 0.5 ms to 0.04 ms per 20 ms PCM chunk.
+The 1.5-second prebuffer previously used by the generic streaming example
+added about 1.5 seconds before `ACTIVE`; its default is now 100 ms.
+
+Repeat the measurements on one selected speaker, or play a raw PCM file with
+realtime pacing:
+
+```powershell
+uv run python examples/measure_clip_latency.py --ip 192.168.1.20 --formats 24000:1 24000:2 48000:2 --repeat 3 --output latency.json
+uv run python examples/realtime_pcm_clip.py speech.pcm --ip 192.168.1.20 --volume 8
+```
+
 ### Live events
 
 Live updates use Sonos UPnP event subscriptions. `EventSubscription` starts a
