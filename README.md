@@ -273,6 +273,7 @@ process dies before `unduck()`, the player restores playback on its own.
 | Method | Returns | Description |
 | --- | --- | --- |
 | `await queue(*, start=0, count=100)` | `list[Track]` | Paginated queue listing with 1-based `position` on each track |
+| `await open(value, *, title="", radio=False, next_=False)` | `int \| None` | Plays a URI or `Favorite`; `next_=True` enqueues it next without replacing current playback and returns its queue position |
 | `await enqueue_uri(uri, *, metadata="", next_=False, play=False)` | `int \| None` | Adds a URI to the queue; returns the assigned position. `next_=True` inserts after the current track, `play=True` jumps to it and starts playback |
 | `await remove_queue_item(position)` | `None` | Removes one item by queue position |
 | `await clear_queue()` | `None` | Empties the queue |

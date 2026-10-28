@@ -1253,3 +1253,29 @@ def test_close_releases_http_and_clip_server_if_websocket_close_fails(
         await client.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("kind", ["uri", "favorite", "radio"])
+def test_open_next_enqueues_without_replacing_current_playback(
+    recorder: _RecordingSoap, kind: str
+) -> None:
+    recorder._responses["AddURIToQueue"] = {"FirstTrackNumberEnqueued": "7"}
+    value = (
+        Favorite(title="Jazz", uri="http://example.test/jazz", metadata="<meta/>")
+        if kind == "favorite"
+        else "http://example.test/jazz"
+    )
+    client = SonosClient("192.168.1.10")
+    position = _run(client.open(value, next_=True, radio=kind == "radio", title="Jazz"))
+    assert position == 7
+    assert [call[2] for call in recorder.calls] == ["AddURIToQueue"]
+    args = recorder.calls[0][3]
+    assert args["EnqueueAsNext"] == "1"
+    if kind == "favorite":
+        assert args["EnqueuedURIMetaData"] == "<meta/>"
+    elif kind == "radio":
+        assert args["EnqueuedURI"] == "x-rincon-mp3radio://example.test/jazz"
+        assert "Jazz" in str(args["EnqueuedURIMetaData"])
+    else:
+        assert args["EnqueuedURI"] == value
+        assert args["EnqueuedURIMetaData"] == ""

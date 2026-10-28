@@ -391,6 +391,14 @@ class SonosClient:
         radio: bool = False,
         next_: bool = False,
     ) -> int | None:
+        if next_:
+            if isinstance(value, Favorite):
+                return await self.enqueue_uri(
+                    value.uri, metadata=value.metadata, next_=True
+                )
+            uri = radio_uri(value) if radio else value
+            metadata = radio_metadata(title or uri, uri) if radio else ""
+            return await self.enqueue_uri(uri, metadata=metadata, next_=True)
         if isinstance(value, Favorite):
             await self.open_favorite(value)
             return None
