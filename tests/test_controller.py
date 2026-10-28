@@ -247,7 +247,8 @@ def test_failed_or_cancelled_discovery_can_retry(
             if calls == 1:
                 started.set()
                 await release.wait()
-                raise DiscoveryError("temporarily unavailable")
+                if not cancel_first:
+                    raise DiscoveryError("temporarily unavailable")
             return household
 
         monkeypatch.setattr(controller_module, "discover", discover)
@@ -259,15 +260,20 @@ def test_failed_or_cancelled_discovery_can_retry(
                 second = asyncio.create_task(sonos.speaker("Kitchen"))
                 if cancel_first:
                     first.cancel()
-                else:
-                    release.set()
+                release.set()
                 with pytest.raises(
                     asyncio.CancelledError if cancel_first else DiscoveryError
                 ):
                     await first
-                client = await asyncio.wait_for(second, timeout=1)
+                if cancel_first:
+                    client = await asyncio.wait_for(second, timeout=1)
+                    assert calls == 1
+                else:
+                    with pytest.raises(DiscoveryError):
+                        await second
+                    client = await sonos.speaker("Kitchen")
+                    assert calls == 2
                 assert client.ip == "192.168.1.10"
-                assert calls == 2
             finally:
                 first.cancel()
                 if second is not None:
@@ -431,5 +437,74 @@ def test_room_handles_route_transport_but_keep_volume_clips_and_grouping_local(
             calls.clear()
             await room.play()
             assert office.ip in calls[0][0]
+
+    asyncio.run(run())
+
+
+def test_pending_discovery_does_not_block_direct_access_and_is_cancelled_on_close(
+    monkeypatch: pytest.MonkeyPatch, household: SonosSystem
+) -> None:
+    async def run() -> None:
+        started, cancelled = asyncio.Event(), asyncio.Event()
+
+        async def discover(**kwargs: object) -> SonosSystem:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+            return household
+
+        monkeypatch.setattr(controller_module, "discover", discover)
+        sonos = SonosController()
+        async with sonos:
+            pending = asyncio.create_task(sonos.speakers())
+            await asyncio.wait_for(started.wait(), timeout=1)
+            direct = await asyncio.wait_for(sonos.speaker(ip="192.168.1.20"), timeout=1)
+            assert direct.ip == "192.168.1.20"
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        assert cancelled.is_set() and direct.is_closed
+        assert sonos.system is None
+
+    asyncio.run(run())
+
+
+def test_pending_subscription_does_not_block_lookups_and_is_cancelled_on_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        started, cancelled = asyncio.Event(), asyncio.Event()
+
+        class Watcher:
+            closed = False
+
+            async def start(self) -> None:
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+
+            async def close(self) -> None:
+                self.closed = True
+
+        watcher = Watcher()
+        monkeypatch.setattr(
+            client_module.SonosClient, "watch", lambda self, **kwargs: watcher
+        )
+
+        async def subscribe(sonos: SonosController) -> None:
+            async with sonos.watch(ip="192.168.1.10"):
+                raise AssertionError("subscription never started")
+
+        async with SonosController() as sonos:
+            pending = asyncio.create_task(subscribe(sonos))
+            await asyncio.wait_for(started.wait(), timeout=1)
+            direct = await asyncio.wait_for(sonos.speaker(ip="192.168.1.20"), timeout=1)
+            assert not direct.is_closed
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        assert cancelled.is_set() and watcher.closed
 
     asyncio.run(run())

@@ -63,6 +63,7 @@ class SonosClient:
         self._port = port
         self._uid = uid
         self._transport_resolver: Callable[[], Awaitable[SonosClient]] | None = None
+        self._close_lock = asyncio.Lock()
         self._closed = False
         self._owns_client = http_client is None
         self._http = http_client or httpx2.AsyncClient(timeout=timeout)
@@ -106,16 +107,17 @@ class SonosClient:
         return self._closed
 
     async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        server, self._audio_clip_server = self._audio_clip_server, None
-        async with AsyncExitStack() as cleanup:
-            if self._owns_client:
-                cleanup.push_async_callback(self._http.aclose)
-            if server is not None:
-                cleanup.push_async_callback(asyncio.to_thread, server.close)
-            cleanup.push_async_callback(self._audio_clip_websocket.close)
+        async with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            server, self._audio_clip_server = self._audio_clip_server, None
+            async with AsyncExitStack() as cleanup:
+                if self._owns_client:
+                    cleanup.push_async_callback(self._http.aclose)
+                if server is not None:
+                    cleanup.push_async_callback(asyncio.to_thread, server.close)
+                cleanup.push_async_callback(self._audio_clip_websocket.close)
 
     async def __aenter__(self) -> Self:
         self._ensure_open()

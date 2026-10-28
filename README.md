@@ -147,7 +147,9 @@ Read-only properties: `timeout`, `discovery_timeout`, `include_invisible`, and
 
 All controller operations require an open `async with SonosController()`
 context. Concurrent first calls to `speaker()` and `speakers()` share one
-discovery. Call `discover()` explicitly to refresh the topology after grouping
+discovery. Cancelling one lookup leaves discovery running for other callers;
+closing the controller cancels it. Discovery and subscription startup do not
+block independent speaker lookups. Call `discover()` explicitly to refresh the topology after grouping
 changes. Room aliases resolving to the same device return the same client;
 manually closing one makes the next lookup create a fresh client.
 
