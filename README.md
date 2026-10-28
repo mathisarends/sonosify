@@ -143,6 +143,9 @@ SonosController(
 Read-only properties: `timeout`, `discovery_timeout`, `include_invisible`, and
 `system` (the cached `SonosSystem`, or `None` before the first discovery).
 
+Concurrent first calls to `client()` share one discovery. Call `discover()`
+explicitly to refresh the cached topology after grouping changes.
+
 The module-level `discover()` function is exported too, if you want a
 `SonosSystem` without holding on to a controller:
 

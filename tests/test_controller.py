@@ -6,6 +6,7 @@ import pytest
 
 import sonosify.controller as controller_module
 from sonosify import AVTransportEvent, SonosController, TransportState
+from sonosify.errors import DiscoveryError
 from sonosify.models import Group, Speaker
 from sonosify.topology import SonosSystem
 
@@ -236,3 +237,106 @@ def test_controller_set_volume_targets_non_coordinator_client(
 
     assert recording_client.calls == ["set_volume:30"]
     assert seen_kwargs["coordinator"] is False
+
+
+def test_concurrent_first_clients_share_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+        system = SonosSystem(
+            (
+                Speaker(ip="192.168.1.10", room_name="Kitchen", uid="k"),
+                Speaker(ip="192.168.1.11", room_name="Office", uid="o"),
+            ),
+            (),
+        )
+
+        async def discover(**kwargs: object) -> SonosSystem:
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return system
+
+        monkeypatch.setattr(controller_module, "discover", discover)
+        controller = SonosController()
+        pending = [asyncio.create_task(controller.client("Kitchen"))]
+        clients = []
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1.0)
+            pending.extend(
+                asyncio.create_task(controller.client(room))
+                for room in ("Office", "Kitchen")
+            )
+            await asyncio.sleep(0)
+            assert calls == 1
+            release.set()
+            clients = await asyncio.wait_for(asyncio.gather(*pending), timeout=1.0)
+            assert [client.ip for client in clients] == [
+                "192.168.1.10",
+                "192.168.1.11",
+                "192.168.1.10",
+            ]
+            assert calls == 1
+        finally:
+            release.set()
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.gather(*(client.close() for client in clients))
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("cancel_first", [False, True])
+def test_failed_or_cancelled_first_discovery_allows_next_client_to_retry(
+    monkeypatch: pytest.MonkeyPatch, cancel_first: bool
+) -> None:
+    async def run() -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+        system = SonosSystem((Speaker(ip="192.168.1.10", room_name="Kitchen"),), ())
+
+        async def discover(**kwargs: object) -> SonosSystem:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                started.set()
+                await release.wait()
+                raise DiscoveryError("temporarily unavailable")
+            return system
+
+        monkeypatch.setattr(controller_module, "discover", discover)
+        controller = SonosController()
+        first = asyncio.create_task(controller.client("Kitchen"))
+        second = None
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1.0)
+            second = asyncio.create_task(controller.client("Kitchen"))
+            if cancel_first:
+                first.cancel()
+            else:
+                release.set()
+            with pytest.raises(
+                asyncio.CancelledError if cancel_first else DiscoveryError
+            ):
+                await first
+            client = await asyncio.wait_for(second, timeout=1.0)
+            try:
+                assert client.ip == "192.168.1.10"
+                assert calls == 2
+            finally:
+                await client.close()
+        finally:
+            first.cancel()
+            if second is not None:
+                second.cancel()
+            await asyncio.gather(
+                first, *(() if second is None else (second,)), return_exceptions=True
+            )
+
+    asyncio.run(run())

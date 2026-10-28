@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 
@@ -19,6 +20,7 @@ class SonosController:
         self._discovery_timeout = discovery_timeout
         self._include_invisible = include_invisible
         self._system: SonosSystem | None = None
+        self._discovery_lock = asyncio.Lock()
 
     @property
     def timeout(self) -> float:
@@ -53,7 +55,8 @@ class SonosController:
     ) -> SonosClient:
         if ip is not None:
             return SonosClient(ip, timeout=self._timeout)
-        system = self._system or await self.discover()
+        async with self._discovery_lock:
+            system = self._system or await self.discover()
         return system.client(
             room,
             ip=ip,
