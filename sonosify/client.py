@@ -394,6 +394,12 @@ class SonosClient:
         value = result.get("FirstTrackNumberEnqueued")
         position = int(value) if value and value.isdigit() else None
         if play and position is not None:
+            player_id = await self._get_or_fetch_player_id()
+            await self.__av_transport(
+                "SetAVTransportURI",
+                CurrentURI=f"x-rincon-queue:{player_id}#0",
+                CurrentURIMetaData="",
+            )
             await self.seek_queue(position)
             await self.play()
         return position

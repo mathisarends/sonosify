@@ -698,15 +698,49 @@ def test_enqueue_uri_returns_none_when_position_missing(
     assert position is None
 
 
-def test_enqueue_uri_with_play_seeks_and_plays(recorder: _RecordingSoap) -> None:
+@pytest.mark.parametrize("uid", ["RINCON_1", ""])
+def test_enqueue_uri_with_play_selects_queue_before_seeking(
+    recorder: _RecordingSoap, uid: str
+) -> None:
     recorder._responses["AddURIToQueue"] = {"FirstTrackNumberEnqueued": "5"}
+    identity_requests: list[httpx.Request] = []
+
+    def device_metadata(request: httpx.Request) -> httpx.Response:
+        identity_requests.append(request)
+        return httpx.Response(200, text="<root><UDN>uuid:RINCON_1</UDN></root>")
+
+    async def run() -> int | None:
+        async with (
+            httpx.AsyncClient(transport=httpx.MockTransport(device_metadata)) as http,
+            SonosClient("192.168.1.10", uid=uid, http_client=http) as client,
+        ):
+            return await client.enqueue_uri("http://stream", play=True)
+
+    assert _run(run()) == 5
+    assert [call[2] for call in recorder.calls] == [
+        "AddURIToQueue",
+        "SetAVTransportURI",
+        "Seek",
+        "Play",
+    ]
+    assert recorder.calls[1][3] == {
+        "InstanceID": "0",
+        "CurrentURI": "x-rincon-queue:RINCON_1#0",
+        "CurrentURIMetaData": "",
+    }
+    assert recorder.calls[2][3]["Target"] == "5"
+    assert len(identity_requests) == (0 if uid else 1)
+    if identity_requests:
+        assert identity_requests[0].url.path == "/xml/device_description.xml"
+
+
+def test_enqueue_with_play_does_not_switch_source_without_a_position(
+    recorder: _RecordingSoap,
+) -> None:
     client = SonosClient("192.168.1.10")
 
-    position = _run(client.enqueue_uri("http://stream", play=True))
-
-    assert position == 5
-    actions = [call[2] for call in recorder.calls]
-    assert actions == ["AddURIToQueue", "Seek", "Play"]
+    assert _run(client.enqueue_uri("http://stream", play=True)) is None
+    assert [call[2] for call in recorder.calls] == ["AddURIToQueue"]
 
 
 def test_line_in_uses_explicit_speaker_source(recorder: _RecordingSoap) -> None:
