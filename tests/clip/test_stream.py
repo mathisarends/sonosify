@@ -294,3 +294,58 @@ def test_cancelled_write_or_end_cleans_up_pending_queue_tasks(ending: bool) -> N
             server.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("cancel_wait", [False, True])
+def test_interrupted_completion_wait_leaves_stream_writable(cancel_wait: bool) -> None:
+    async def run() -> None:
+        started = asyncio.Event()
+        finished = asyncio.Event()
+
+        class PendingWebSocket(_WebSocket):
+            async def wait_for_audio_clip(
+                self, clip_id: str, *, timeout: float | None = None
+            ) -> dict[str, object]:
+                started.set()
+                async with asyncio.timeout(timeout):
+                    await finished.wait()
+                return await super().wait_for_audio_clip(clip_id, timeout=timeout)
+
+        server = AudioClipServer(host="127.0.0.1")
+        token, streamed = server.add_stream("audio/wav")
+        handle = AudioClipStream(
+            streamed=streamed,
+            server=server,
+            token=token,
+            websocket=PendingWebSocket(),  # type: ignore[arg-type]
+            load=lambda: asyncio.sleep(0, result=_clip()),
+            cancel=lambda clip_id: asyncio.sleep(0),
+            prebuffer_bytes=0,
+        )
+        waiter: asyncio.Task[AudioClip] | None = None
+        try:
+            await handle.write(b"before")
+            waiter = asyncio.create_task(
+                handle.wait_until_finished(timeout=None if cancel_wait else 0.01)
+            )
+            await asyncio.wait_for(started.wait(), timeout=1.0)
+            if cancel_wait:
+                waiter.cancel()
+            with pytest.raises(asyncio.CancelledError if cancel_wait else TimeoutError):
+                await waiter
+
+            assert not streamed.closed.is_set()
+            await handle.write(b"after")
+            await handle.end()
+            finished.set()
+            result = await handle.wait_until_finished(timeout=1.0)
+            assert result.status is ClipStatus.DONE
+            assert streamed.closed.is_set()
+        finally:
+            handle.close()
+            if waiter is not None:
+                waiter.cancel()
+                await asyncio.gather(waiter, return_exceptions=True)
+            server.close()
+
+    asyncio.run(run())

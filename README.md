@@ -372,8 +372,11 @@ clip = await stream.wait_until_finished(timeout=60)
 
 `write()` applies bounded backpressure. `end()` lets buffered playback finish;
 `abort()` tears down the HTTP body and cancels a clip that has already loaded.
-`wait_until_fetched()` reports when the player opens the HTTP request. The
-public clip types and helpers are also importable from `sonosify.clip`.
+`wait_until_fetched()` reports when the player opens the HTTP request.
+A timeout or cancellation of `wait_until_finished()` leaves playback running;
+you can wait again, or call `abort()` to stop it. Stream data is released when
+completion is confirmed or the stream or client is closed. The public clip
+types and helpers are also importable from `sonosify.clip`.
 
 ### Live events
 

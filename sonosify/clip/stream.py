@@ -91,14 +91,12 @@ class AudioClipStream:
     async def wait_until_finished(self, *, timeout: float | None = None) -> AudioClip:
         if self._clip is None:
             raise RuntimeError("audio clip has not been loaded yet")
-        try:
-            value = await self._websocket.wait_for_audio_clip(
-                self._clip.id, timeout=timeout
-            )
-            self._clip = AudioClip.model_validate(value)
-            return self._clip
-        finally:
-            self._server.remove(self._token)
+        value = await self._websocket.wait_for_audio_clip(
+            self._clip.id, timeout=timeout
+        )
+        self._clip = AudioClip.model_validate(value)
+        self._server.remove(self._token)
+        return self._clip
 
     def close(self) -> None:
         self._closed = True
