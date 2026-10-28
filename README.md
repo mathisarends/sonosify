@@ -225,7 +225,7 @@ process dies before `unduck()`, the player restores playback on its own.
 
 | Method | Returns | Description |
 | --- | --- | --- |
-| `await now_playing()` | `PlaybackState` | Combines transport state, the parsed current `Track`, elapsed time, and duration |
+| `await now_playing()` | `PlaybackState` | Fetches transport and position concurrently; combines state, current `Track`, elapsed time, and duration |
 | `await get_transport_info()` | `TransportInfo` | Raw `GetTransportInfo` result: `state` (`TransportState`), `status`, `speed` |
 | `await get_position_info()` | `PositionInfo` | Raw `GetPositionInfo` result: track number, URI, duration, metadata, relative/absolute time |
 | `await get_room_name()` | `str` | The speaker's zone name |

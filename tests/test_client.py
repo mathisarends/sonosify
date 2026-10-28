@@ -1107,3 +1107,71 @@ def test_unduck_sends_player_volume_command(monkeypatch: pytest.MonkeyPatch) -> 
         "playerId": "RINCON_1",
     }
     assert calls[0][1] == {}
+
+
+def test_now_playing_fetches_transport_and_position_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        started = {
+            name: asyncio.Event() for name in ("GetTransportInfo", "GetPositionInfo")
+        }
+
+        async def player(http, endpoint, service, action, args):  # type: ignore[no-untyped-def]
+            started[action].set()
+            await asyncio.gather(*(event.wait() for event in started.values()))
+            if action == "GetTransportInfo":
+                return {"CurrentTransportState": "PLAYING"}
+            return {"TrackURI": "x-sonos:1", "RelTime": "0:01:00"}
+
+        monkeypatch.setattr(client_module, "soap_call", player)
+        async with SonosClient("192.168.1.10") as client:
+            playback = await asyncio.wait_for(client.now_playing(), timeout=1.0)
+        assert playback.state == "PLAYING"
+        assert playback.relative_time == "0:01:00"
+        assert playback.track is not None
+        assert playback.track.uri == "x-sonos:1"
+
+    _run(run())
+
+
+@pytest.mark.parametrize("cancel_call", [False, True])
+def test_now_playing_cleans_up_requests_on_failure_or_cancellation(
+    monkeypatch: pytest.MonkeyPatch, cancel_call: bool
+) -> None:
+    async def run() -> None:
+        position_started = asyncio.Event()
+        position_stopped = asyncio.Event()
+        failure = NetworkError("transport unavailable")
+
+        async def player(http, endpoint, service, action, args):  # type: ignore[no-untyped-def]
+            if action == "GetTransportInfo":
+                await position_started.wait()
+                if not cancel_call:
+                    raise failure
+                await asyncio.Event().wait()
+            position_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                position_stopped.set()
+
+        monkeypatch.setattr(client_module, "soap_call", player)
+        async with SonosClient("192.168.1.10") as client:
+            pending = asyncio.create_task(client.now_playing())
+            try:
+                await asyncio.wait_for(position_started.wait(), timeout=1.0)
+                if cancel_call:
+                    pending.cancel()
+                with pytest.raises(
+                    asyncio.CancelledError if cancel_call else NetworkError
+                ) as error:
+                    await asyncio.wait_for(pending, timeout=1.0)
+                if not cancel_call:
+                    assert error.value is failure
+                assert position_stopped.is_set()
+            finally:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+
+    _run(run())

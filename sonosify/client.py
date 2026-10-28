@@ -481,8 +481,17 @@ class SonosClient:
         return PositionInfo.model_validate(result)
 
     async def now_playing(self) -> PlaybackState:
-        transport = await self.get_transport_info()
-        position = await self.get_position_info()
+        requests = (
+            asyncio.create_task(self.get_transport_info()),
+            asyncio.create_task(self.get_position_info()),
+        )
+        try:
+            transport, position = await asyncio.gather(*requests)
+        except BaseException:
+            for request in requests:
+                request.cancel()
+            await asyncio.gather(*requests, return_exceptions=True)
+            raise
         track = parse_track_metadata(
             position.track_metadata,
             uri=position.track_uri,
