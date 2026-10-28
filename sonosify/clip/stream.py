@@ -86,13 +86,13 @@ class AudioClipStream:
 
     async def wait_until_fetched(self, *, timeout: float | None = None) -> None:
         async with asyncio.timeout(timeout):
-            await self._streamed.requested.wait()
+            await self._wait(self._streamed.requested.wait())
 
     async def wait_until_finished(self, *, timeout: float | None = None) -> AudioClip:
         if self._clip is None:
             raise RuntimeError("audio clip has not been loaded yet")
-        value = await self._websocket.wait_for_audio_clip(
-            self._clip.id, timeout=timeout
+        value = await self._wait(
+            self._websocket.wait_for_audio_clip(self._clip.id, timeout=timeout)
         )
         self._clip = AudioClip.model_validate(value)
         self._server.remove(self._token)
@@ -143,6 +143,23 @@ class AudioClipStream:
             put.cancel()
             unavailable.cancel()
             await asyncio.gather(put, unavailable, return_exceptions=True)
+
+    async def _wait[T](self, operation: Awaitable[T]) -> T:
+        pending = asyncio.ensure_future(operation)
+        unavailable = asyncio.create_task(self._streamed.unavailable.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {pending, unavailable}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if pending in done:
+                return pending.result()
+            if self._streamed.disconnected.is_set():
+                raise NetworkError("Sonos player disconnected from audio clip stream")
+            raise NetworkError("audio clip stream was closed")
+        finally:
+            pending.cancel()
+            unavailable.cancel()
+            await asyncio.gather(pending, unavailable, return_exceptions=True)
 
     def _ensure_writable(self) -> None:
         if self._aborted:

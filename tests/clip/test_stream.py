@@ -379,3 +379,67 @@ def test_prebuffer_is_available_before_load_and_can_exceed_queue_capacity() -> N
             server.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("operation", ["fetch", "finish"])
+@pytest.mark.parametrize("reason", ["close", "abort", "disconnect", "server"])
+def test_stream_waiters_wake_when_stream_becomes_unavailable(
+    operation: str, reason: str
+) -> None:
+    from sonosify.clip.server import _StreamedAudio
+
+    async def run() -> None:
+        finished_waiter_cancelled = asyncio.Event()
+
+        class Server:
+            def remove(self, token: str) -> None:
+                streamed.close()
+
+        class WebSocket:
+            async def wait_for_audio_clip(self, clip_id: str, *, timeout=None):  # type: ignore[no-untyped-def]
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    finished_waiter_cancelled.set()
+
+        async def load() -> AudioClip:
+            return _clip()
+
+        async def cancel(clip_id: str) -> None:
+            pass
+
+        streamed = _StreamedAudio("audio/wav", asyncio.get_running_loop())
+        stream = AudioClipStream(
+            streamed=streamed,
+            server=Server(),
+            token="test",
+            websocket=WebSocket(),  # type: ignore[arg-type]
+            load=load,
+            cancel=cancel,
+            prebuffer_bytes=0,
+        )
+        await stream.write(b"audio")
+        wait = (
+            stream.wait_until_fetched()
+            if operation == "fetch"
+            else stream.wait_until_finished()
+        )
+        pending = asyncio.create_task(wait)
+        await asyncio.sleep(0)
+        if reason == "close":
+            stream.close()
+        elif reason == "abort":
+            await stream.abort()
+        elif reason == "disconnect":
+            streamed.disconnected.set()
+            streamed.unavailable.set()
+        else:
+            streamed.close()
+        with pytest.raises(
+            NetworkError, match="disconnected" if reason == "disconnect" else "closed"
+        ):
+            await asyncio.wait_for(pending, timeout=1)
+        if operation == "finish":
+            assert finished_waiter_cancelled.is_set()
+
+    asyncio.run(run())
