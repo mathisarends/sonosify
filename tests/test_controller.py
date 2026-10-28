@@ -172,12 +172,11 @@ def test_shortcuts_reuse_clients_and_target_room_volume(
     async def run() -> None:
         async with SonosController(timeout=3) as sonos:
             kitchen = await sonos.speaker("Kitchen")
-            assert await sonos.speaker("Office") is kitchen
             await sonos.play("Office")
             await sonos.pause("Kitchen")
             await sonos.stop("Kitchen")
             await sonos.set_volume(30, "Office")
-            office = await sonos.speaker("Office", coordinator=False)
+            office = await sonos.speaker("Office")
             assert office.ip == "192.168.1.11"
             assert not kitchen.is_closed and not office.is_closed
             assert kitchen.port == 1401
@@ -375,5 +374,62 @@ def test_watch_closes_subscription_and_preserves_managed_client(
                 assert not client.is_closed
         assert client.is_closed
         assert options["callback_port"] == 1234
+
+    asyncio.run(run())
+
+
+def test_room_handles_route_transport_but_keep_volume_clips_and_grouping_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kitchen = Speaker(ip="192.168.1.10", room_name="Kitchen", uid="k")
+    office = Speaker(
+        ip="192.168.1.11", room_name="Office", uid="o", coordinator_uid="k"
+    )
+    systems = [
+        SonosSystem((kitchen, office), ()),
+        SonosSystem((kitchen, office.model_copy(update={"coordinator_uid": "o"})), ()),
+    ]
+    calls: list[tuple[str, str, dict[str, object]]] = []
+    clip_players: list[str] = []
+
+    async def discover(**kwargs: object) -> SonosSystem:
+        return systems.pop(0)
+
+    async def soap(http, endpoint, service, action, args):  # type: ignore[no-untyped-def]
+        calls.append((endpoint, action, args))
+        if action == "AddURIToQueue":
+            return {"FirstTrackNumberEnqueued": "1"}
+        return {}
+
+    async def command(self, header, options=None):  # type: ignore[no-untyped-def]
+        clip_players.append(header["playerId"])
+        return {"id": "clip-1", "name": "test", "appId": "test"}
+
+    monkeypatch.setattr(controller_module, "discover", discover)
+    monkeypatch.setattr(client_module, "soap_call", soap)
+    monkeypatch.setattr(client_module.AudioClipWebSocket, "send_command", command)
+
+    async def run() -> None:
+        async with SonosController() as sonos:
+            room = await sonos.speaker("Office")
+            assert room.ip == office.ip and room.uid == office.uid
+            assert await sonos.speaker(ip=office.ip) is room
+            await room.enqueue_uri("http://example.test/song", play=True)
+            assert all(kitchen.ip in endpoint for endpoint, _, _ in calls)
+            assert calls[1][2]["CurrentURI"] == "x-rincon-queue:k#0"
+            calls.clear()
+            await room.set_volume(20)
+            await room.play_audio_clip(app_id="test")
+            await room.join(kitchen)
+            await room.unjoin()
+            assert all(office.ip in endpoint for endpoint, _, _ in calls)
+            assert clip_players == ["o"]
+            calls.clear()
+            await room.set_group_volume(25)
+            assert kitchen.ip in calls[0][0]
+            await sonos.discover()
+            calls.clear()
+            await room.play()
+            assert office.ip in calls[0][0]
 
     asyncio.run(run())

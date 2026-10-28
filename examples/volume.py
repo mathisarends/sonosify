@@ -18,7 +18,7 @@ async def main() -> None:
     room = sys.argv[1]
 
     async with SonosController() as sonos:
-        client = await sonos.speaker(room, coordinator=False)
+        client = await sonos.speaker(room)
         if len(sys.argv) > 2:
             await client.set_volume(int(sys.argv[2]))
 

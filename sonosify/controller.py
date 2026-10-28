@@ -1,4 +1,5 @@
 import asyncio
+import functools
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Self
@@ -85,7 +86,6 @@ class SonosController:
         room: str | None = None,
         *,
         ip: str | None = None,
-        coordinator: bool = True,
     ) -> SonosClient:
         if room is not None and ip is not None:
             raise ValueError("pass either a room name or an IP address")
@@ -96,23 +96,42 @@ class SonosController:
             else:
                 system = self._system or await self._discover()
                 target = system.find(room, include_invisible=self._include_invisible)
-                if coordinator:
-                    target = system.coordinator_for(target)
-            key = (target.ip, target.port)
-            client = self._clients.get(key)
-            if (
-                client is not None
-                and target.uid
-                and client.uid
-                and target.uid != client.uid
-            ):
-                await client.close()
-            if client is None or client.is_closed:
-                client = SonosClient.from_speaker(
-                    target, timeout=self._timeout, http_client=http
+            return await self._client_for(target, http)
+
+    async def _client_for(
+        self, target: Speaker, http: httpx2.AsyncClient
+    ) -> SonosClient:
+        key = (target.ip, target.port)
+        client = self._clients.get(key)
+        if (
+            client is not None
+            and target.uid
+            and client.uid
+            and target.uid != client.uid
+        ):
+            await client.close()
+        if client is None or client.is_closed:
+            client = SonosClient.from_speaker(
+                target, timeout=self._timeout, http_client=http
+            )
+            client._transport_resolver = functools.partial(self._transport_for, target)
+            self._clients[key] = client
+        return client
+
+    async def _transport_for(self, target: Speaker) -> SonosClient:
+        async with self._lock:
+            http = self._require_open()
+            if self._system is not None:
+                current = next(
+                    (
+                        speaker
+                        for speaker in self._system.speakers
+                        if (speaker.ip, speaker.port) == (target.ip, target.port)
+                    ),
+                    target,
                 )
-                self._clients[key] = client
-            return client
+                target = self._system.coordinator_for(current)
+            return await self._client_for(target, http)
 
     @asynccontextmanager
     async def watch(
@@ -120,13 +139,12 @@ class SonosController:
         room: str | None = None,
         *,
         ip: str | None = None,
-        coordinator: bool = True,
         services: Sequence[str | EventService] = DEFAULT_SERVICES,
         callback_host: str | None = None,
         callback_port: int = 0,
         timeout_seconds: int = 300,
     ) -> AsyncGenerator[EventSubscription]:
-        client = await self.speaker(room, ip=ip, coordinator=coordinator)
+        client = await self.speaker(room, ip=ip)
         async with self._lock:
             self._require_open()
             watcher = client.watch(
@@ -160,7 +178,7 @@ class SonosController:
     async def set_volume(
         self, volume: int, room: str | None = None, *, ip: str | None = None
     ) -> None:
-        client = await self.speaker(room, ip=ip, coordinator=False)
+        client = await self.speaker(room, ip=ip)
         await client.set_volume(volume)
 
     def _require_open(self) -> httpx2.AsyncClient:

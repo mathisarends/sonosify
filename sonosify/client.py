@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack
 from typing import Self
 from xml.etree import ElementTree
@@ -62,6 +62,7 @@ class SonosClient:
         self._ip = ip
         self._port = port
         self._uid = uid
+        self._transport_resolver: Callable[[], Awaitable[SonosClient]] | None = None
         self._closed = False
         self._owns_client = http_client is None
         self._http = http_client or httpx2.AsyncClient(timeout=timeout)
@@ -414,7 +415,8 @@ class SonosClient:
         value = result.get("FirstTrackNumberEnqueued")
         position = int(value) if value and value.isdigit() else None
         if play and position is not None:
-            player_id = await self._get_or_fetch_player_id()
+            transport = await self._transport_client()
+            player_id = await transport._get_or_fetch_player_id()
             await self._av_transport(
                 "SetAVTransportURI",
                 CurrentURI=f"x-rincon-queue:{player_id}#0",
@@ -571,14 +573,20 @@ class SonosClient:
 
     async def join(self, coordinator: Speaker | str) -> None:
         coordinator_uid = self._source_uid(coordinator)
-        await self._av_transport(
+        await self._soap(
+            _UPnPService.AV_TRANSPORT,
             "SetAVTransportURI",
+            InstanceID="0",
             CurrentURI=f"x-rincon:{coordinator_uid}",
             CurrentURIMetaData="",
         )
 
     async def unjoin(self) -> None:
-        await self._av_transport("BecomeCoordinatorOfStandaloneGroup")
+        await self._soap(
+            _UPnPService.AV_TRANSPORT,
+            "BecomeCoordinatorOfStandaloneGroup",
+            InstanceID="0",
+        )
 
     def watch(
         self,
@@ -606,8 +614,15 @@ class SonosClient:
         result = await self._soap(_UPnPService.DEVICE_PROPERTIES, "GetZoneAttributes")
         return result.get("CurrentZoneName", "")
 
+    async def _transport_client(self) -> SonosClient:
+        self._ensure_open()
+        if self._transport_resolver is None:
+            return self
+        return await self._transport_resolver()
+
     async def _av_transport(self, action: str, **args: object) -> dict[str, str]:
-        return await self._soap(
+        transport = await self._transport_client()
+        return await transport._soap(
             _UPnPService.AV_TRANSPORT, action, InstanceID="0", **args
         )
 
@@ -628,12 +643,14 @@ class SonosClient:
         )
 
     async def _group_rendering(self, action: str, **args: object) -> dict[str, str]:
-        return await self._soap(
+        transport = await self._transport_client()
+        return await transport._soap(
             _UPnPService.GROUP_RENDERING_CONTROL, action, InstanceID="0", **args
         )
 
     async def _content_directory(self, action: str, **args: object) -> dict[str, str]:
-        return await self._soap(_UPnPService.CONTENT_DIRECTORY, action, **args)
+        transport = await self._transport_client()
+        return await transport._soap(_UPnPService.CONTENT_DIRECTORY, action, **args)
 
     async def _soap(
         self, service: _UPnPService, action: str, **args: object

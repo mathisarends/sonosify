@@ -135,8 +135,8 @@ SonosController(
 | `await close()` | `None` | Closes all managed clients, active controller subscriptions, and the shared HTTP pool; also called on context exit |
 | `await discover()` | `SonosSystem` | Refreshes discovery and caches the resulting topology |
 | `await speakers()` | `tuple[Speaker, ...]` | Lists discovered speaker metadata; discovers on first use |
-| `await speaker(room=None, *, ip=None, coordinator=True)` | `SonosClient` | Resolves and reuses a managed client. Discovers on first named lookup; `ip` skips discovery. Pass either a room or an IP. `coordinator=True` redirects to the group coordinator for transport commands; use `False` to address an individual speaker |
-| `watch(room=None, *, ip=None, coordinator=True, services=..., callback_host=None, callback_port=0, timeout_seconds=300)` | async context manager → `EventSubscription` | Subscribes to live UPnP events for one speaker (see [Live events](#live-events)) |
+| `await speaker(room=None, *, ip=None)` | `SonosClient` | Resolves and reuses a managed client. Discovers on first named lookup; `ip` skips discovery. Pass either a room or an IP. The handle always represents the selected room. Transport, queue, and group-volume commands automatically use its group coordinator |
+| `watch(room=None, *, ip=None, services=..., callback_host=None, callback_port=0, timeout_seconds=300)` | async context manager → `EventSubscription` | Subscribes to live UPnP events for one speaker (see [Live events](#live-events)) |
 | `await play(room=None, *, ip=None)` | `None` | Plays through a managed client, reusing its connections |
 | `await pause(room=None, *, ip=None)` | `None` | Pauses through a managed client |
 | `await stop(room=None, *, ip=None)` | `None` | Stops through a managed client |
@@ -167,6 +167,13 @@ context; leaving it keeps the managed speaker's connections available.
 `await sonos.speaker(...)`, move `async with` to the controller, and remove the
 per-speaker context. `SonosSystem.client()` and direct `SonosClient` usage keep
 their existing lifetimes.
+
+Controller speaker handles keep their room identity: volume, mute, audio clips,
+`join()`, and `unjoin()` target that room. Playback, queue, and group volume use
+the coordinator from the cached topology. After changing groups, call
+`await sonos.discover()`; existing handles then use the refreshed routing.
+The controller no longer accepts a `coordinator` flag. Direct `SonosClient`
+instances and the lower-level `SonosSystem.client()` keep explicit targeting.
 
 The module-level `discover()` function is exported too, if you want a
 `SonosSystem` without holding on to a controller:
